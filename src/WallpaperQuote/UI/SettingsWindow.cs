@@ -263,7 +263,7 @@ namespace WallpaperQuote.UI
                     Ui.Spacer(8),
                     Ui.Horizontal(_gBuiltIn, _gUser, _gOnline)),
                 Ui.Card(
-                    Ui.Row(_search, _groupFilter, Ui.Btn("+ Thêm quote", () => OpenQuoteDialog(null), primary: true)),
+                    Ui.Row(_search, _groupFilter, Ui.Btn("Nhập nhiều quote", OpenBulkDialog), Ui.Btn("+ Thêm quote", () => OpenQuoteDialog(null), primary: true)),
                     _quoteCount,
                     _quoteList,
                     Ui.Spacer(6),
@@ -328,6 +328,12 @@ namespace WallpaperQuote.UI
         private void OpenQuoteDialog(Quote? editing)
         {
             var dialog = new QuoteDialog(_host, editing) { Owner = this };
+            dialog.ShowDialog();
+        }
+
+        private void OpenBulkDialog()
+        {
+            var dialog = new BulkQuoteDialog(_host) { Owner = this };
             dialog.ShowDialog();
         }
 

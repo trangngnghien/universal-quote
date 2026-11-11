@@ -7,6 +7,14 @@ using System.Text.Json;
 
 namespace WallpaperQuote.Core
 {
+    public sealed class BulkImportResult
+    {
+        public int Added { get; set; }
+        public int Duplicates { get; set; }
+        public int Invalid { get; set; }
+        public List<string> InvalidLines { get; } = new List<string>();
+    }
+
     public sealed class OnlineQuoteCatalog
     {
         public int Version { get; set; }
@@ -86,6 +94,103 @@ namespace WallpaperQuote.Core
             SaveUser();
             return q;
         }
+
+        /// <summary>
+        /// Nhập nhiều quote cùng lúc. Mỗi dòng 1 quote: "Nội dung | Tác giả | Nguồn | vi/en"
+        /// (dấu | hoặc Tab; các phần sau nội dung không bắt buộc). File .csv: các cột cách nhau bởi dấu phẩy.
+        /// <paramref name="defaultLang"/>: "vi", "en" hoặc "auto" (tự nhận theo dấu tiếng Việt).
+        /// </summary>
+        public BulkImportResult AddUserBulk(string content, string defaultLang, bool csv)
+        {
+            var result = new BulkImportResult();
+            var lines = (content ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var raw = lines[i].Trim();
+                if (raw.Length == 0 || raw.StartsWith("#")) continue;
+
+                var parts = SplitLine(raw, csv);
+                if (i == 0 && IsHeader(parts[0])) continue;
+
+                var text = StripQuotes(parts[0]);
+                var author = parts.Count > 1 ? StripQuotes(parts[1]) : null;
+                var source = parts.Count > 2 ? StripQuotes(parts[2]) : null;
+                var lang = parts.Count > 3 ? parts[3].Trim().ToLowerInvariant() : "";
+                if (lang != QuoteLanguage.Vietnamese && lang != QuoteLanguage.English)
+                    lang = defaultLang == QuoteLanguage.Vietnamese || defaultLang == QuoteLanguage.English ? defaultLang : DetectLanguage(text);
+
+                var error = Validate(text, author, source, null);
+                if (error == "Quote này đã có trong thư viện.") { result.Duplicates++; continue; }
+                if (error != null)
+                {
+                    result.Invalid++;
+                    if (result.InvalidLines.Count < 5) result.InvalidLines.Add($"Dòng {i + 1}: {error}");
+                    continue;
+                }
+                _user.Add(new Quote
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Text = text.Trim(),
+                    Author = Clean(author),
+                    Source = Clean(source),
+                    Lang = lang,
+                    Group = QuoteGroup.User
+                });
+                result.Added++;
+            }
+            if (result.Added > 0) SaveUser();
+            return result;
+        }
+
+        private static List<string> SplitLine(string line, bool csv)
+        {
+            if (line.Contains('|')) return line.Split('|').Select(p => p.Trim()).ToList();
+            if (line.Contains('\t')) return line.Split('\t').Select(p => p.Trim()).ToList();
+            if (!csv) return new List<string> { line };
+
+            // CSV đơn giản: phẩy hoặc chấm phẩy ngăn cột, hỗ trợ ô trong ngoặc kép.
+            var sep = line.Contains(';') && !line.Contains(',') ? ';' : ',';
+            var fields = new List<string>();
+            var current = new System.Text.StringBuilder();
+            var inQuotes = false;
+            for (var i = 0; i < line.Length; i++)
+            {
+                var c = line[i];
+                if (c == '"')
+                {
+                    if (inQuotes && i + 1 < line.Length && line[i + 1] == '"') { current.Append('"'); i++; }
+                    else inQuotes = !inQuotes;
+                }
+                else if (c == sep && !inQuotes)
+                {
+                    fields.Add(current.ToString().Trim());
+                    current.Clear();
+                }
+                else current.Append(c);
+            }
+            fields.Add(current.ToString().Trim());
+            return fields;
+        }
+
+        private static bool IsHeader(string first)
+        {
+            var f = StripQuotes(first).ToLowerInvariant();
+            return f == "nội dung" || f == "noi dung" || f == "quote" || f == "text" || f == "content";
+        }
+
+        private static string StripQuotes(string s)
+        {
+            var t = (s ?? "").Trim();
+            if (t.Length >= 2 && ((t[0] == '"' && t[t.Length - 1] == '"') || (t[0] == '“' && t[t.Length - 1] == '”')))
+                t = t.Substring(1, t.Length - 2).Trim();
+            return t;
+        }
+
+        private const string VietnameseLetters = "ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ";
+
+        /// <summary>Có chữ cái tiếng Việt có dấu → "vi", ngược lại "en".</summary>
+        public static string DetectLanguage(string text) =>
+            (text ?? "").ToLowerInvariant().Any(c => VietnameseLetters.IndexOf(c) >= 0) ? QuoteLanguage.Vietnamese : QuoteLanguage.English;
 
         public void UpdateUser(string id, string text, string? author, string? source, string lang)
         {

@@ -29,7 +29,7 @@ namespace WallpaperQuote
     /// </summary>
     public sealed class AppHost : IDisposable
     {
-        public const string Version = "0.2.0";
+        public const string Version = "0.2.1";
 
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
@@ -541,6 +541,7 @@ namespace WallpaperQuote
             _settings.NasaApiKey = string.IsNullOrWhiteSpace(key) ? "DEMO_KEY" : key.Trim();
             SettingsStore.Save(_settings);
             NotifyChanged();
+            if (_settings.NasaEnabled) _ = SyncOnlineAsync(force: true);
         }
 
         /// <summary>Việc nền định kỳ: đồng bộ online 1 lần/ngày, tải lại link đang chờ.</summary>
@@ -592,9 +593,14 @@ namespace WallpaperQuote
                 {
                     try
                     {
-                        var fetched = await Net.FetchNasaAsync(_settings.NasaApiKey, perSource, CancellationToken.None);
+                        var skip = new HashSet<string>(_online.Items.Select(i => i.Id));
+                        var fetched = await Net.FetchNasaAsync(_settings.NasaApiKey, 60, skip, CancellationToken.None);
                         var added = await DownloadCandidatesAsync(fetched.Accepted, perSource);
-                        parts.Add($"NASA +{added} ảnh" + (fetched.RejectedLicense > 0 ? $" (loại {fetched.RejectedLicense} ảnh có bản quyền)" : ""));
+                        var notes = new List<string>();
+                        if (fetched.RejectedLicense > 0) notes.Add($"loại {fetched.RejectedLicense} ảnh có bản quyền");
+                        if (fetched.RejectedMedia > 0) notes.Add($"{fetched.RejectedMedia} video");
+                        parts.Add($"NASA +{added} ảnh" + (notes.Count > 0 ? $" ({string.Join(", ", notes)})" : ""));
+                        Log.Info($"NASA: {fetched.Accepted.Count} ảnh public domain mới, tải được {added}, {fetched.RejectedLicense} có bản quyền, {fetched.RejectedMedia} video");
                         anyOk = true;
                     }
                     catch (RateLimitException)
@@ -602,9 +608,14 @@ namespace WallpaperQuote
                         parts.Add("NASA: vượt hạn mức, thử lại ngày mai (nên dùng API key riêng)");
                         anyOk = true;
                     }
+                    catch (DownloadException ex)
+                    {
+                        parts.Add("NASA: " + ex.Message);
+                        Log.Warn($"Đồng bộ NASA lỗi: {ex.Message}");
+                    }
                     catch (Exception ex)
                     {
-                        parts.Add("NASA: lỗi kết nối");
+                        parts.Add("NASA: máy chủ phản hồi chậm hoặc lỗi kết nối, sẽ thử lại");
                         Log.Warn($"Đồng bộ NASA lỗi: {ex.Message}");
                     }
                 }
@@ -676,13 +687,8 @@ namespace WallpaperQuote
                 try
                 {
                     var dest = Path.Combine(Paths.OnlineCacheDir, Net.HashName(c.Id));
-                    var file = await Net.DownloadImageAsync(c.ImageUrl, dest, CancellationToken.None);
-                    var width = ImageProbe.Width(file);
-                    if (width == null || width.Value < _settings.MinImageWidth)
-                    {
-                        try { File.Delete(file); } catch { }
-                        continue;
-                    }
+                    var file = await TryDownloadAsync(c.ImageUrl, dest) ?? (c.FallbackUrl != null ? await TryDownloadAsync(c.FallbackUrl, dest) : null);
+                    if (file == null) continue;
                     _online.Add(new OnlineImage
                     {
                         Id = c.Id,
@@ -702,6 +708,24 @@ namespace WallpaperQuote
                 }
             }
             return added;
+        }
+
+        /// <summary>Tải 1 ảnh online và kiểm tra độ rộng. Trả null nếu lỗi hoặc ảnh quá nhỏ.</summary>
+        private async Task<string?> TryDownloadAsync(string url, string dest)
+        {
+            try
+            {
+                var file = await Net.DownloadImageAsync(url, dest, CancellationToken.None);
+                var width = ImageProbe.Width(file);
+                if (width != null && width.Value >= _settings.MinImageWidth) return file;
+                Log.Warn($"Ảnh online quá nhỏ hoặc không đọc được ({width?.ToString() ?? "?"}px): {url}");
+                try { File.Delete(file); } catch { }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Không tải được ảnh online {url}: {ex.Message}");
+            }
+            return null;
         }
 
         public void ClearCache()
@@ -741,6 +765,19 @@ namespace WallpaperQuote
             _quotes.AddUser(text, author, source, lang);
             RebuildQuoteBag();
             NotifyChanged();
+        }
+
+        public BulkImportResult ImportUserQuotes(string content, string defaultLang, bool csv)
+        {
+            var result = _quotes.AddUserBulk(content, defaultLang, csv);
+            if (result.Added > 0 && !_settings.UseUserQuotes)
+            {
+                _settings.UseUserQuotes = true;   // vừa nhập quote cá nhân thì bật nhóm này
+                SettingsStore.Save(_settings);
+            }
+            RebuildQuoteBag();
+            NotifyChanged();
+            return result;
         }
 
         public void UpdateUserQuote(string id, string text, string? author, string? source, string lang)

@@ -30,6 +30,8 @@ namespace WallpaperQuote.Platform
         public string Id { get; set; } = "";
         public string Source { get; set; } = "";
         public string ImageUrl { get; set; } = "";
+        /// <summary>Link ảnh nhỏ hơn, dùng khi ảnh HD tải lỗi hoặc quá 30MB.</summary>
+        public string? FallbackUrl { get; set; }
         public string Title { get; set; } = "";
         public string? Author { get; set; }
         public string License { get; set; } = "";
@@ -52,6 +54,8 @@ namespace WallpaperQuote.Platform
         public const long MaxImageBytes = 30L * 1024 * 1024;
 
         private static readonly HttpClient Api = Create(TimeSpan.FromSeconds(15));
+        /// <summary>API NASA có lúc phản hồi chậm 15–40 giây.</summary>
+        private static readonly HttpClient Slow = Create(TimeSpan.FromSeconds(60));
         private static readonly HttpClient Files = Create(TimeSpan.FromSeconds(90));
 
         private static HttpClient Create(TimeSpan timeout)
@@ -69,26 +73,41 @@ namespace WallpaperQuote.Platform
 
         // ------------------------------------------------------------ NASA APOD
 
-        /// <summary>Lấy ảnh ngẫu nhiên từ NASA APOD. Chỉ nhận ảnh (không video) có trường copyright trống (BR W5.1).</summary>
-        public static async Task<FetchResult> FetchNasaAsync(string apiKey, int count, CancellationToken ct)
+        /// <summary>
+        /// Lấy ảnh NASA APOD trong <paramref name="days"/> ngày gần nhất (1 lần gọi, theo khoảng ngày).
+        /// Chỉ nhận ảnh (không video) có trường copyright trống (BR W5.1). Ảnh mới nhất trước.
+        /// </summary>
+        public static async Task<FetchResult> FetchNasaAsync(string apiKey, int days, ISet<string> skipIds, CancellationToken ct)
         {
-            var url = $"https://api.nasa.gov/planetary/apod?api_key={Uri.EscapeDataString(apiKey)}&count={count}&thumbs=false";
-            using var response = await Api.GetAsync(url, ct);
+            // Giờ Mỹ (APOD ra ảnh theo giờ miền Đông Mỹ) → lùi 1 ngày để không hỏi ngày chưa có ảnh.
+            var end = DateTime.UtcNow.AddHours(-5).Date.AddDays(-1);
+            var start = end.AddDays(-(days - 1));
+            var url = $"https://api.nasa.gov/planetary/apod?api_key={Uri.EscapeDataString(apiKey)}" +
+                      $"&start_date={start:yyyy-MM-dd}&end_date={end:yyyy-MM-dd}&thumbs=false";
+            using var response = await Slow.GetAsync(url, ct);
             if ((int)response.StatusCode == 429) throw new RateLimitException();
+            if ((int)response.StatusCode == 403 || (int)response.StatusCode == 401)
+                throw new DownloadException("API key NASA không hợp lệ");
             response.EnsureSuccessStatusCode();
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
 
             var result = new FetchResult();
             if (doc.RootElement.ValueKind != JsonValueKind.Array) return result;
-            foreach (var item in doc.RootElement.EnumerateArray())
+            var items = new List<JsonElement>();
+            foreach (var item in doc.RootElement.EnumerateArray()) items.Add(item);
+            items.Reverse();   // mới nhất trước
+            foreach (var item in items)
             {
+                if (skipIds.Contains("nasa-" + (Str(item, "date") ?? ""))) continue;
                 var media = Str(item, "media_type");
                 if (media != "image") { result.RejectedMedia++; continue; }
                 var copyright = Str(item, "copyright");
                 if (!string.IsNullOrWhiteSpace(copyright)) { result.RejectedLicense++; continue; }
-                var image = Str(item, "hdurl") ?? Str(item, "url");
+                var hd = Str(item, "hdurl");
+                var normal = Str(item, "url");
+                var image = hd ?? normal;
                 var date = Str(item, "date");
-                if (string.IsNullOrWhiteSpace(image) || string.IsNullOrWhiteSpace(date)) continue;
+                if (string.IsNullOrWhiteSpace(image) || string.IsNullOrWhiteSpace(date)) { result.RejectedMedia++; continue; }
 
                 string? page = null;
                 if (DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
@@ -99,6 +118,7 @@ namespace WallpaperQuote.Platform
                     Id = "nasa-" + date,
                     Source = OnlineSource.Nasa,
                     ImageUrl = image!,
+                    FallbackUrl = hd != null && normal != null && normal != hd ? normal : null,
                     Title = Str(item, "title") ?? "Ảnh thiên văn NASA",
                     Author = "NASA",
                     License = "Public Domain",
@@ -124,7 +144,7 @@ namespace WallpaperQuote.Platform
                 if (skipIds.Contains(id)) continue;
 
                 var url = $"https://en.wikipedia.org/api/rest_v1/feed/featured/{day:yyyy}/{day:MM}/{day:dd}";
-                using var response = await Api.GetAsync(url, ct);
+                using var response = await Slow.GetAsync(url, ct);
                 if ((int)response.StatusCode == 429) throw new RateLimitException();
                 if (!response.IsSuccessStatusCode) continue;
                 using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));

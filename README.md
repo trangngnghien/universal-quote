@@ -15,6 +15,8 @@ App Windows tự đổi hình nền máy tính kèm một câu quote ngẫu nhi�
 - **Ảnh qua đường link**: dán 1 hoặc nhiều link ảnh trực tiếp (http/https), có trạng thái Sẵn sàng / Lỗi / Chờ tải, Thử lại, Xóa.
 - **Ảnh online public**: NASA (ảnh thiên văn) và Wikimedia Commons (ảnh trong ngày), chỉ nhận ảnh Public Domain / CC0, đồng bộ 1 lần/ngày, tối đa 10 ảnh mỗi nguồn. Có ô nhập NASA API key riêng.
 - **Quote cá nhân**: thêm / sửa / xóa, có tác giả, nguồn trích dẫn, ngôn ngữ; chống trùng; lọc theo nhóm và tìm kiếm.
+- **Nhập nhiều quote** (bản 0.2.1): tab Quote → *Nhập nhiều quote* → dán nhiều dòng hoặc chọn file .txt/.csv.
+  Mỗi dòng: `Nội dung | Tác giả | Nguồn | vi hoặc en` (chỉ nội dung là bắt buộc). Dán thẳng từ Excel/Google Sheets cũng được.
 - **Quote online**: tải từ `catalog/quotes.json` trong repo này (sửa file đó để thêm quote cho mọi máy).
 - Nhận thêm ảnh **.HEIC** (cần cài *HEIF Image Extensions* từ Microsoft Store), **.jfif, .gif, .tif**; hạ ngưỡng ảnh tối thiểu còn **800px**.
 - **Desktop**: tự hiện lại biểu tượng desktop nếu Windows đang ẩn; tạo lối tắt mở app; mở app lần 2 sẽ bật cửa sổ Cài đặt.

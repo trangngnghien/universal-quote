@@ -155,31 +155,60 @@ namespace WallpaperQuote.Platform
 
         public static bool ShortcutExists() => File.Exists(ShortcutPath);
 
-        /// <summary>Tạo lối tắt "Hình nền & Quote" ngoài desktop trỏ tới file exe đang chạy.</summary>
+        /// <summary>
+        /// Tạo lối tắt "Hình nền & Quote" ngoài desktop trỏ tới file exe đang chạy.
+        /// Dùng trực tiếp giao diện IShellLinkW (Unicode) để tên có dấu và desktop trong OneDrive vẫn lưu được.
+        /// </summary>
         public static bool CreateShortcut()
         {
             try
             {
                 var exe = Environment.ProcessPath;
                 if (string.IsNullOrEmpty(exe)) return false;
-                var shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) return false;
-                dynamic shell = Activator.CreateInstance(shellType)!;
-                dynamic link = shell.CreateShortcut(ShortcutPath);
-                link.TargetPath = exe;
-                link.WorkingDirectory = Path.GetDirectoryName(exe);
-                link.Description = "Mở cài đặt Hình nền & Quote";
-                link.IconLocation = exe + ",0";
-                link.Save();
+                var link = (IShellLinkW)new ShellLinkCom();
+                link.SetPath(exe);
+                link.SetWorkingDirectory(Path.GetDirectoryName(exe) ?? "");
+                link.SetDescription("Mở cài đặt Hình nền & Quote");
+                link.SetIconLocation(exe, 0);
+                var target = ShortcutPath;
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                ((System.Runtime.InteropServices.ComTypes.IPersistFile)link).Save(target, true);
                 Marshal.FinalReleaseComObject(link);
-                Marshal.FinalReleaseComObject(shell);
-                return true;
+                return File.Exists(target);
             }
             catch (Exception ex)
             {
                 Log.Error("Không tạo được lối tắt ngoài desktop", ex);
                 return false;
             }
+        }
+
+        [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+        private class ShellLinkCom
+        {
+        }
+
+        [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+        private interface IShellLinkW
+        {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file, int maxPath, IntPtr findData, uint flags);
+            void GetIDList(out IntPtr idList);
+            void SetIDList(IntPtr idList);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder name, int maxName);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder dir, int maxPath);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string dir);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder args, int maxPath);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
+            void GetHotkey(out short hotkey);
+            void SetHotkey(short hotkey);
+            void GetShowCmd(out int showCmd);
+            void SetShowCmd(int showCmd);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder iconPath, int maxPath, out int iconIndex);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string iconPath, int iconIndex);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string relPath, uint reserved);
+            void Resolve(IntPtr hwnd, uint flags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
         }
 
         /// <summary>Windows đang ẩn biểu tượng desktop (chuột phải desktop → View → bỏ tick "Show desktop icons").</summary>
