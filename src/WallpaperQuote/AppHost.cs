@@ -29,7 +29,7 @@ namespace WallpaperQuote
     /// </summary>
     public sealed class AppHost : IDisposable
     {
-        public const string Version = "0.2.1";
+        public const string Version = "0.2.2";
 
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
@@ -114,20 +114,18 @@ namespace WallpaperQuote
             _ = InitialAsync(openSettings: !autostart);
         }
 
-        /// <summary>Hiện lại biểu tượng desktop nếu đang bị ẩn và tạo lối tắt mở app (chỉ lần đầu).</summary>
+        /// <summary>
+        /// Không tự động can thiệp desktop (tạo lối tắt, bật biểu tượng) để tránh bị Windows nghi ngờ.
+        /// Người dùng tự bấm trong Cài đặt → tab Chung. Chỉ ghi nhật ký nếu biểu tượng desktop đang bị ẩn.
+        /// </summary>
         private void EnsureDesktop()
         {
             if (!_settings.DesktopIconsChecked)
             {
                 _settings.DesktopIconsChecked = true;
-                if (DesktopIntegration.IconsHidden() && DesktopIntegration.ShowIcons())
-                    Log.Info("Đã hiện lại biểu tượng desktop");
+                if (DesktopIntegration.IconsHidden()) Log.Info("Biểu tượng desktop đang bị Windows ẩn (người dùng có thể bật trong tab Chung)");
+                SettingsStore.Save(_settings);
             }
-            if (!_settings.DesktopShortcutCreated)
-            {
-                _settings.DesktopShortcutCreated = DesktopIntegration.CreateShortcut();
-            }
-            SettingsStore.Save(_settings);
         }
 
         private async Task InitialAsync(bool openSettings)
@@ -139,7 +137,7 @@ namespace WallpaperQuote
                 _settings.WelcomeShown = true;
                 SettingsStore.Save(_settings);
                 _tray?.Notify("Hình nền & Quote đang chạy",
-                    "Hình nền tự đổi theo lịch. Nháy đúp icon dưới khay để làm mới ngay. Mở lối tắt \"Hình nền & Quote\" ngoài desktop để vào Cài đặt.");
+                    "Hình nền tự đổi theo lịch. Nháy đúp icon dưới khay để làm mới ngay. Chuột phải icon → Cài đặt để mở lại cửa sổ này.");
             }
 
             if (openSettings) OpenSettings();

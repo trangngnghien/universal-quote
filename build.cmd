@@ -19,7 +19,7 @@ if errorlevel 1 (
 )
 
 dotnet publish "src\WallpaperQuote\WallpaperQuote.csproj" -c Release -r win-x64 --self-contained true ^
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true ^
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true ^
   -o dist
 
 if errorlevel 1 (

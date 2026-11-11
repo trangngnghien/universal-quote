@@ -11,7 +11,15 @@
     <RootNamespace>WallpaperQuote</RootNamespace>
     <AssemblyName>WallpaperQuote</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.2.0</Version>
+    <Version>0.2.2</Version>
+    <FileVersion>0.2.2.0</FileVersion>
+    <AssemblyVersion>0.2.2.0</AssemblyVersion>
+    <Company>trangngnghien</Company>
+    <Authors>trangngnghien</Authors>
+    <Copyright>Copyright (c) 2026 trangngnghien</Copyright>
+    <AssemblyTitle>Hình nền &amp; Quote</AssemblyTitle>
+    <Description>Ứng dụng đổi hình nền desktop kèm câu quote ngẫu nhiên. Mã nguồn: https://github.com/trangngnghien/universal-quote</Description>
+    <NeutralLanguage>vi-VN</NeutralLanguage>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Product>Hình nền &amp; Quote</Product>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>

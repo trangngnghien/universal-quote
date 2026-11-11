@@ -18,22 +18,41 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Publish single-file exe (self-contained, khong can cai .NET khi chay)
+      # Dang 1: mot file exe duy nhat, KHONG nen (file nen hay bi Windows nghi ngo hon)
+      - name: Publish single-file exe (khong nen)
         run: >
           dotnet publish src/WallpaperQuote/WallpaperQuote.csproj -c Release -r win-x64 --self-contained true
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
-          -o dist
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o dist-single
+
+      # Dang 2: thu muc day du (cac file .dll cua Microsoft giu nguyen chu ky so cua Microsoft)
+      - name: Publish folder
+        run: >
+          dotnet publish src/WallpaperQuote/WallpaperQuote.csproj -c Release -r win-x64 --self-contained true
+          -o dist-folder/WallpaperQuote
+
+      - name: Zip folder
+        shell: pwsh
+        run: Compress-Archive -Path dist-folder/WallpaperQuote -DestinationPath WallpaperQuote-folder.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: WallpaperQuote-win-x64
-          path: dist/WallpaperQuote.exe
+          path: |
+            dist-single/WallpaperQuote.exe
+            WallpaperQuote-folder.zip
 
-      - name: Dua file exe vao muc Releases
+      - name: Dua file vao muc Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: "Ban build ${{ github.run_number }}"
-          body: "Tai WallpaperQuote.exe ben duoi, bam dup de chay. Khong can cai .NET."
+          body: |
+            Hai dang, chon 1:
+            - WallpaperQuote.exe: 1 file, bam dup de chay.
+            - WallpaperQuote-folder.zip: giai nen, mo thu muc WallpaperQuote, bam dup WallpaperQuote.exe ben trong.
+            Khong can cai .NET.
           prerelease: true
-          files: dist/WallpaperQuote.exe
+          files: |
+            dist-single/WallpaperQuote.exe
+            WallpaperQuote-folder.zip
