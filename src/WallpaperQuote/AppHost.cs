@@ -29,7 +29,7 @@ namespace WallpaperQuote
     /// </summary>
     public sealed class AppHost : IDisposable
     {
-        public const string Version = "0.2.2";
+        public const string Version = "0.3.0";
 
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
@@ -60,6 +60,7 @@ namespace WallpaperQuote
         private int _slot;
         private bool _noImageNotified;
         private bool _disposed;
+        private bool _editingPosition;
 
         /// <summary>Báo cho cửa sổ Cài đặt và tray cập nhật lại hiển thị.</summary>
         public event Action? StateChanged;
@@ -233,7 +234,7 @@ namespace WallpaperQuote
             {
                 try
                 {
-                    var request = new RenderRequest(image, quote, width, height, _settings.FitMode);
+                    var request = new RenderRequest(image, quote, width, height, _settings.FitMode, _settings.QuotePosX, _settings.QuotePosY);
                     await Sta.Run(() => WallpaperRenderer.RenderToFile(request, output));
                     break;
                 }
@@ -584,6 +585,7 @@ namespace WallpaperQuote
 
             var parts = new List<string>();
             var anyOk = false;
+            var allOk = true;
             const int perSource = 10;
             try
             {
@@ -609,11 +611,13 @@ namespace WallpaperQuote
                     catch (DownloadException ex)
                     {
                         parts.Add("NASA: " + ex.Message);
+                        allOk = false;
                         Log.Warn($"Đồng bộ NASA lỗi: {ex.Message}");
                     }
                     catch (Exception ex)
                     {
-                        parts.Add("NASA: máy chủ phản hồi chậm hoặc lỗi kết nối, sẽ thử lại");
+                        parts.Add("NASA: máy chủ phản hồi chậm hoặc lỗi kết nối, sẽ thử lại sau 30 phút");
+                        allOk = false;
                         Log.Warn($"Đồng bộ NASA lỗi: {ex.Message}");
                     }
                 }
@@ -623,7 +627,7 @@ namespace WallpaperQuote
                     try
                     {
                         var skip = new HashSet<string>(_online.Items.Select(i => i.Id));
-                        var fetched = await Net.FetchWikimediaAsync(perSource, skip, CancellationToken.None);
+                        var fetched = await Net.FetchWikimediaAsync(30, skip, CancellationToken.None);
                         var added = await DownloadCandidatesAsync(fetched.Accepted, perSource);
                         parts.Add($"Wikimedia +{added} ảnh" + (fetched.RejectedLicense > 0 ? $" (loại {fetched.RejectedLicense} ảnh không phải PD/CC0)" : ""));
                         anyOk = true;
@@ -635,7 +639,8 @@ namespace WallpaperQuote
                     }
                     catch (Exception ex)
                     {
-                        parts.Add("Wikimedia: lỗi kết nối");
+                        parts.Add("Wikimedia: lỗi kết nối, sẽ thử lại sau 30 phút");
+                        allOk = false;
                         Log.Warn($"Đồng bộ Wikimedia lỗi: {ex.Message}");
                     }
                 }
@@ -659,7 +664,7 @@ namespace WallpaperQuote
                     }
                 }
 
-                if (anyOk) _settings.LastOnlineSync = DateTime.Now;
+                if (anyOk && allOk) _settings.LastOnlineSync = DateTime.Now;
                 _settings.LastOnlineSyncMessage = $"Đồng bộ lúc {DateTime.Now:HH:mm dd/MM}: " + string.Join(" · ", parts);
                 _online.Evict((long)_settings.CacheLimitMb * 1024 * 1024, _currentImage,
                     _settings.Links.Where(l => l.File != null).Select(l => l.File!));
@@ -828,6 +833,62 @@ namespace WallpaperQuote
         public async Task SetFitModeAsync(string fitMode)
         {
             _settings.FitMode = fitMode;
+            SettingsStore.Save(_settings);
+            await ChangeAsync(Change.Rerender, auto: false);
+        }
+
+        /// <summary>
+        /// Mở chế độ chỉnh vị trí quote toàn màn hình: hiện hình nền hiện tại (chưa có quote),
+        /// người dùng kéo khung quote bằng chuột rồi Lưu → vẽ lại hình nền.
+        /// </summary>
+        public async Task EditQuotePositionAsync()
+        {
+            if (_editingPosition || _disposed) return;
+            _editingPosition = true;
+            try
+            {
+                var screen = (Forms.Screen.PrimaryScreen ?? Forms.Screen.AllScreens.First()).Bounds;
+                var width = Math.Max(640, screen.Width);
+                var height = Math.Max(480, screen.Height);
+                var preview = Path.Combine(Paths.LocalDir, "preview.jpg");
+                var image = _currentImage != null && File.Exists(_currentImage) ? _currentImage : null;
+                try
+                {
+                    var request = new RenderRequest(image, null, width, height, _settings.FitMode);
+                    await Sta.Run(() => WallpaperRenderer.RenderToFile(request, preview));
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"Không vẽ được ảnh xem trước, dùng nền tối: {ex.Message}");
+                    var request = new RenderRequest(null, null, width, height, _settings.FitMode);
+                    await Sta.Run(() => WallpaperRenderer.RenderToFile(request, preview));
+                }
+
+                var quote = _currentQuote ?? new Quote { Text = "Có công mài sắt, có ngày nên kim.", Author = "Tục ngữ" };
+                var editor = new QuotePositionWindow(preview, quote, _settings.QuotePosX, _settings.QuotePosY);
+                if (editor.ShowDialog() == true)
+                {
+                    _settings.QuotePosX = editor.ResultX;
+                    _settings.QuotePosY = editor.ResultY;
+                    SettingsStore.Save(_settings);
+                    await ChangeAsync(Change.Rerender, auto: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Lỗi chỉnh vị trí quote", ex);
+            }
+            finally
+            {
+                _editingPosition = false;
+                NotifyChanged();
+            }
+        }
+
+        public async Task ResetQuotePositionAsync()
+        {
+            _settings.QuotePosX = null;
+            _settings.QuotePosY = null;
             SettingsStore.Save(_settings);
             await ChangeAsync(Change.Rerender, auto: false);
         }

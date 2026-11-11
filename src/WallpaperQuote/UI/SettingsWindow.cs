@@ -69,6 +69,7 @@ namespace WallpaperQuote.UI
         private readonly RadioButton _fitStretch = new RadioButton { Content = "Kéo giãn", GroupName = "fit" };
         private readonly TextBlock _iconsText = Ui.Text("", 12, color: Ui.Muted);
         private readonly TextBlock _cacheText = Ui.Text("", 12, color: Ui.Muted);
+        private readonly TextBlock _positionText = Ui.Text("", 12, color: Ui.Muted);
 
         private readonly TextBlock _footer = Ui.Text("", 13, color: Ui.Muted, wrap: false);
 
@@ -395,8 +396,13 @@ namespace WallpaperQuote.UI
                     Ui.Title("Ảnh khác tỉ lệ màn hình thì"),
                     Ui.Spacer(8),
                     Ui.Horizontal(_fitFill, _fitFit, _fitStretch),
+                    Ui.Divider(),
+                    Ui.Title("Vị trí quote"),
+                    _positionText,
                     Ui.Spacer(8),
-                    Ui.Text("Quote hiện ở góc dưới bên phải, chữ trắng trên nền tối mờ.", 12, color: Ui.Muted)),
+                    Ui.Horizontal(
+                        Ui.Btn("Chỉnh vị trí bằng chuột", () => _ = _host.EditQuotePositionAsync(), primary: true),
+                        Ui.Btn("Về góc dưới phải", () => _ = _host.ResetQuotePositionAsync()))),
                 Ui.Card(
                     Ui.Title("Desktop"),
                     _iconsText,
@@ -527,6 +533,9 @@ namespace WallpaperQuote.UI
                 _fitFill.IsChecked = s.FitMode == FitMode.Fill;
                 _fitFit.IsChecked = s.FitMode == FitMode.Fit;
                 _fitStretch.IsChecked = s.FitMode == FitMode.Stretch;
+                _positionText.Text = s.QuotePosX.HasValue
+                    ? "Đang dùng vị trí bạn đã kéo. Chữ trắng trên nền tối mờ."
+                    : "Mặc định: góc dưới bên phải. Bấm nút bên dưới, kéo khung quote tới chỗ bạn muốn trên hình nền rồi bấm Lưu.";
                 _iconsText.Text = (DesktopIntegration.IconsHidden()
                         ? "Biểu tượng desktop đang bị Windows ẩn. Bấm nút bên dưới để hiện lại."
                         : "Biểu tượng desktop đang hiện bình thường. App không ẩn, xóa hay di chuyển file nào của bạn.")

@@ -43,6 +43,7 @@ namespace WallpaperQuote
             _pause = Item("Tạm dừng", () => _host.SetPaused(!_host.IsPaused));
             _menu.Items.Add(_pause);
             _menu.Items.Add(Item("Thông tin ảnh hiện tại", ShowCurrentInfo));
+            _menu.Items.Add(Item("Chỉnh vị trí quote…", () => _ = _host.EditQuotePositionAsync()));
             _menu.Items.Add(Item("Cài đặt…", () => _host.OpenSettings()));
             _menu.Items.Add(new Forms.ToolStripSeparator());
             _menu.Items.Add(Item("Thoát", () => _host.Exit()));

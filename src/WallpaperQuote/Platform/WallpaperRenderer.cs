@@ -44,8 +44,10 @@ namespace WallpaperQuote.Platform
 
     public sealed class RenderRequest
     {
-        public RenderRequest(string? imagePath, Quote? quote, int width, int height, string fitMode)
+        public RenderRequest(string? imagePath, Quote? quote, int width, int height, string fitMode, double? posX = null, double? posY = null)
         {
+            PosX = posX;
+            PosY = posY;
             ImagePath = imagePath;
             Quote = quote;
             Width = width;
@@ -58,6 +60,8 @@ namespace WallpaperQuote.Platform
         public int Width { get; }
         public int Height { get; }
         public string FitMode { get; }
+        public double? PosX { get; }
+        public double? PosY { get; }
     }
 
     /// <summary>
@@ -92,7 +96,7 @@ namespace WallpaperQuote.Platform
                 }
 
                 if (request.Quote != null)
-                    DrawQuote(dc, request.Quote, w, h);
+                    DrawQuote(dc, request.Quote, w, h, request.PosX, request.PosY);
             }
 
             var bitmap = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
@@ -149,7 +153,7 @@ namespace WallpaperQuote.Platform
             }
         }
 
-        private static void DrawQuote(DrawingContext dc, Quote quote, int w, int h)
+        private static void DrawQuote(DrawingContext dc, Quote quote, int w, int h, double? posX, double? posY)
         {
             // Kích thước tính theo chiều cao màn hình, chuẩn 1080p.
             var k = h / 1080.0;
@@ -199,8 +203,19 @@ namespace WallpaperQuote.Platform
             var contentWidth = Math.Max(body.Width, attribution?.Width ?? 0);
             var boxWidth = Math.Min(maxBoxWidth, contentWidth + 2 * padX);
             var boxHeight = padY + body.Height + (attribution != null ? gap + attribution.Height : 0) + padY;
-            var x = w - marginRight - boxWidth;
-            var y = h - marginBottom - boxHeight;
+            double x, y;
+            if (posX.HasValue && posY.HasValue)
+            {
+                // Vị trí người dùng kéo: tâm khung đặt tại điểm đã lưu, giữ khung nằm trọn trong màn hình.
+                var edge = 16 * k;
+                x = Math.Min(Math.Max(posX.Value * w - boxWidth / 2, edge), Math.Max(edge, w - edge - boxWidth));
+                y = Math.Min(Math.Max(posY.Value * h - boxHeight / 2, edge), Math.Max(edge, h - edge - boxHeight));
+            }
+            else
+            {
+                x = w - marginRight - boxWidth;
+                y = h - marginBottom - boxHeight;
+            }
 
             var boxBrush = new SolidColorBrush(BoxColor);
             boxBrush.Freeze();

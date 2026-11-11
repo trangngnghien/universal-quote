@@ -132,6 +132,9 @@ namespace WallpaperQuote.Core
 
         // Hiển thị & hệ thống
         public string FitMode { get; set; } = Core.FitMode.Fill;
+        /// <summary>Tâm khung quote theo tỉ lệ màn hình (0–1). Null = mặc định góc dưới phải.</summary>
+        public double? QuotePosX { get; set; }
+        public double? QuotePosY { get; set; }
         public string? OriginalWallpaper { get; set; }
         public bool OriginalWallpaperSaved { get; set; }
         public bool WelcomeShown { get; set; }
@@ -151,6 +154,9 @@ namespace WallpaperQuote.Core
             if (FitMode != Core.FitMode.Fit && FitMode != Core.FitMode.Stretch) FitMode = Core.FitMode.Fill;
             if (string.IsNullOrWhiteSpace(NasaApiKey)) NasaApiKey = "DEMO_KEY";
             if (CacheLimitMb < 50) CacheLimitMb = 500;
+            if (QuotePosX.HasValue && (QuotePosX < 0 || QuotePosX > 1)) QuotePosX = null;
+            if (QuotePosY.HasValue && (QuotePosY < 0 || QuotePosY > 1)) QuotePosY = null;
+            if (!QuotePosX.HasValue || !QuotePosY.HasValue) { QuotePosX = null; QuotePosY = null; }
 
             // Nâng cấp từ bản M1: hạ ngưỡng ảnh tối thiểu 1280px → 800px.
             if (SettingsVersion < 2)
