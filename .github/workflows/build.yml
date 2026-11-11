@@ -1,0 +1,39 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish single-file exe (self-contained, khong can cai .NET khi chay)
+        run: >
+          dotnet publish src/WallpaperQuote/WallpaperQuote.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+          -o dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WallpaperQuote-win-x64
+          path: dist/WallpaperQuote.exe
+
+      - name: Dua file exe vao muc Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Ban build ${{ github.run_number }}"
+          body: "Tai WallpaperQuote.exe ben duoi, bam dup de chay. Khong can cai .NET."
+          prerelease: true
+          files: dist/WallpaperQuote.exe
