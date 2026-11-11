@@ -1,39 +1,24 @@
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
 using WallpaperQuote.Core;
-using WallpaperQuote.Platform;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
 
 namespace WallpaperQuote
 {
     /// <summary>
-    /// Icon dưới khay hệ thống và menu (W6.1). Bản M1 dùng menu này thay cho cửa sổ Cài đặt (có ở M2).
+    /// Icon dưới khay hệ thống (W6.1): Làm mới ▸ / Tạm dừng / Thông tin ảnh / Cài đặt / Thoát.
     /// Nháy đúp icon = Làm mới tất cả.
     /// </summary>
     public sealed class TrayController : IDisposable
     {
         private const string AppTitle = "Hình nền & Quote";
 
-        private static readonly (int Minutes, string Label)[] Intervals =
-        {
-            (5, "5 phút"), (15, "15 phút"), (30, "30 phút"), (60, "1 giờ"),
-            (180, "3 giờ"), (360, "6 giờ"), (720, "12 giờ"), (1440, "24 giờ")
-        };
-
         private readonly AppHost _host;
         private readonly Forms.NotifyIcon _icon;
         private readonly Forms.ContextMenuStrip _menu;
         private readonly Forms.ToolStripMenuItem _status;
         private readonly Forms.ToolStripMenuItem _pause;
-        private readonly Forms.ToolStripMenuItem _folders;
-        private readonly Forms.ToolStripMenuItem _imageInterval;
-        private readonly Forms.ToolStripMenuItem _quoteInterval;
-        private readonly Forms.ToolStripMenuItem _language;
-        private readonly Forms.ToolStripMenuItem _fit;
-        private readonly Forms.ToolStripMenuItem _startup;
-        private readonly Forms.ToolStripMenuItem _changeOnStartup;
         private Drawing.Icon? _runningIcon;
         private Drawing.Icon? _pausedIcon;
 
@@ -58,41 +43,8 @@ namespace WallpaperQuote
             _pause = Item("Tạm dừng", () => _host.SetPaused(!_host.IsPaused));
             _menu.Items.Add(_pause);
             _menu.Items.Add(Item("Thông tin ảnh hiện tại", ShowCurrentInfo));
+            _menu.Items.Add(Item("Cài đặt…", () => _host.OpenSettings()));
             _menu.Items.Add(new Forms.ToolStripSeparator());
-
-            _folders = new Forms.ToolStripMenuItem("Thư mục ảnh");
-            _menu.Items.Add(_folders);
-
-            _imageInterval = new Forms.ToolStripMenuItem("Đổi ảnh mỗi");
-            _quoteInterval = new Forms.ToolStripMenuItem("Đổi quote mỗi");
-            foreach (var (minutes, label) in Intervals)
-            {
-                var m = minutes;
-                _imageInterval.DropDownItems.Add(Item(label, () => _host.SetImageInterval(m), tag: m));
-                _quoteInterval.DropDownItems.Add(Item(label, () => _host.SetQuoteInterval(m), tag: m));
-            }
-            _menu.Items.Add(_imageInterval);
-            _menu.Items.Add(_quoteInterval);
-
-            _language = new Forms.ToolStripMenuItem("Ngôn ngữ quote");
-            _language.DropDownItems.Add(Item("Tiếng Việt", () => _host.SetQuoteLanguage(QuoteLanguage.Vietnamese), tag: QuoteLanguage.Vietnamese));
-            _language.DropDownItems.Add(Item("Tiếng Anh", () => _host.SetQuoteLanguage(QuoteLanguage.English), tag: QuoteLanguage.English));
-            _language.DropDownItems.Add(Item("Cả hai", () => _host.SetQuoteLanguage(QuoteLanguage.All), tag: QuoteLanguage.All));
-            _menu.Items.Add(_language);
-
-            _fit = new Forms.ToolStripMenuItem("Ảnh khác tỉ lệ màn hình");
-            _fit.DropDownItems.Add(Item("Lấp đầy (cắt bớt mép)", () => _ = _host.SetFitModeAsync(FitMode.Fill), tag: FitMode.Fill));
-            _fit.DropDownItems.Add(Item("Vừa khung (có viền)", () => _ = _host.SetFitModeAsync(FitMode.Fit), tag: FitMode.Fit));
-            _fit.DropDownItems.Add(Item("Kéo giãn", () => _ = _host.SetFitModeAsync(FitMode.Stretch), tag: FitMode.Stretch));
-            _menu.Items.Add(_fit);
-
-            _changeOnStartup = Item("Đổi ảnh và quote khi mở app", () => _host.SetChangeOnStartup(!_host.Settings.ChangeOnStartup));
-            _menu.Items.Add(_changeOnStartup);
-            _startup = Item("Khởi động cùng Windows", ToggleStartup);
-            _menu.Items.Add(_startup);
-            _menu.Items.Add(new Forms.ToolStripSeparator());
-
-            _menu.Items.Add(Item("Mở thư mục nhật ký và hình nền", () => Shell.OpenFolder(Paths.LocalDir)));
             _menu.Items.Add(Item("Thoát", () => _host.Exit()));
 
             _menu.Opening += (_, __) => Refresh();
@@ -105,6 +57,7 @@ namespace WallpaperQuote
                 Visible = false
             };
             _icon.DoubleClick += (_, __) => _ = _host.ChangeAsync(Change.All, auto: false);
+            _icon.BalloonTipClicked += (_, __) => _host.OpenSettings();
         }
 
         public void Show()
@@ -125,100 +78,21 @@ namespace WallpaperQuote
             }
         }
 
-        /// <summary>Cập nhật trạng thái, dấu tick và danh sách thư mục.</summary>
         public void Refresh()
         {
-            var s = _host.Settings;
             var paused = _host.IsPaused;
-
             _status.Text = paused
                 ? $"Tạm dừng · {_host.ImageCount} ảnh · {_host.QuoteCount} quote"
                 : $"Đang chạy · {_host.ImageCount} ảnh · {_host.QuoteCount} quote";
             _pause.Text = paused ? "Tiếp tục" : "Tạm dừng";
-
             var tooltip = paused ? $"{AppTitle} · Tạm dừng" : $"{AppTitle} · Nháy đúp để làm mới";
             _icon.Text = tooltip.Length > 120 ? tooltip.Substring(0, 120) : tooltip;
             _icon.Icon = paused ? _pausedIcon : _runningIcon;
-
-            Check(_imageInterval, s.ImageIntervalMinutes);
-            Check(_quoteInterval, s.QuoteIntervalMinutes);
-            Check(_language, s.QuoteLanguage);
-            Check(_fit, s.FitMode);
-            _changeOnStartup.Checked = s.ChangeOnStartup;
-            _startup.Checked = StartupRegistration.IsEnabled();
-
-            RebuildFolderMenu();
-        }
-
-        private void RebuildFolderMenu()
-        {
-            var s = _host.Settings;
-            _folders.DropDownItems.Clear();
-
-            var missing = _host.LastScan?.MissingFolders;
-            foreach (var folder in s.Folders)
-            {
-                var path = folder;
-                var unavailable = missing != null && missing.Exists(m => string.Equals(m, path, StringComparison.OrdinalIgnoreCase));
-                var label = unavailable ? $"{path}  (không khả dụng)" : path;
-                var item = new Forms.ToolStripMenuItem(label);
-                item.DropDownItems.Add(Item("Gỡ thư mục này", () => ConfirmRemoveFolder(path)));
-                _folders.DropDownItems.Add(item);
-            }
-            if (s.Folders.Count == 0)
-                _folders.DropDownItems.Add(new Forms.ToolStripMenuItem("(Chưa có thư mục nào)") { Enabled = false });
-
-            _folders.DropDownItems.Add(new Forms.ToolStripSeparator());
-            _folders.DropDownItems.Add(Item("Thêm thư mục…", PickFolder));
-            var sub = Item("Quét cả thư mục con", () => _ = _host.SetScanSubfoldersAsync(!s.ScanSubfolders));
-            sub.Checked = s.ScanSubfolders;
-            _folders.DropDownItems.Add(sub);
-            _folders.DropDownItems.Add(Item("Quét lại", () => _ = _host.RescanAsync()));
-
-            var scan = _host.LastScan;
-            if (scan != null && (scan.TooSmall > 0 || scan.Unreadable > 0))
-            {
-                _folders.DropDownItems.Add(new Forms.ToolStripSeparator());
-                _folders.DropDownItems.Add(new Forms.ToolStripMenuItem(
-                    $"Bỏ qua {scan.TooSmall} ảnh nhỏ hơn {s.MinImageWidth}px, {scan.Unreadable} ảnh lỗi")
-                { Enabled = false });
-            }
-        }
-
-        private void PickFolder()
-        {
-            using var dialog = new Forms.FolderBrowserDialog
-            {
-                Description = "Chọn thư mục chứa ảnh làm hình nền",
-                UseDescriptionForTitle = true,
-                ShowNewFolderButton = false
-            };
-            if (dialog.ShowDialog() == Forms.DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath))
-                _ = _host.AddFolderAsync(dialog.SelectedPath);
-        }
-
-        private void ConfirmRemoveFolder(string folder)
-        {
-            var answer = Forms.MessageBox.Show(
-                $"Gỡ thư mục này khỏi app?\n\n{folder}\n\nẢnh trong thư mục vẫn giữ nguyên trên máy.",
-                AppTitle, Forms.MessageBoxButtons.YesNo, Forms.MessageBoxIcon.Question);
-            if (answer == Forms.DialogResult.Yes)
-                _ = _host.RemoveFolderAsync(folder);
-        }
-
-        private void ToggleStartup()
-        {
-            var target = !StartupRegistration.IsEnabled();
-            if (!StartupRegistration.Set(target))
-                Notify("Không đổi được cài đặt khởi động", "Windows không cho ghi cài đặt. Trạng thái giữ như cũ.", warning: true);
-            Refresh();
         }
 
         private void ShowCurrentInfo()
         {
-            var image = _host.CurrentImage;
             var quote = _host.CurrentQuote;
-            var imageText = image == null ? "Chưa có ảnh (đang dùng nền tối)" : $"{Path.GetFileName(image)}\n{Path.GetDirectoryName(image)}";
             var quoteText = "Không có";
             if (quote != null)
             {
@@ -230,28 +104,19 @@ namespace WallpaperQuote
             var nextText = next == null ? (_host.IsPaused ? "Đang tạm dừng" : "—") : next.Value.ToString("HH:mm");
 
             Forms.MessageBox.Show(
-                $"Ảnh:\n{imageText}\n\nQuote:\n{quoteText}\n\nĐổi ảnh tiếp theo lúc: {nextText}",
+                $"Ảnh:\n{_host.DescribeCurrentImage()}\n\nQuote:\n{quoteText}\n\nĐổi ảnh tiếp theo lúc: {nextText}",
                 "Thông tin ảnh hiện tại", Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Information);
         }
 
-        private static Forms.ToolStripMenuItem Item(string text, Action onClick, object? tag = null)
+        private static Forms.ToolStripMenuItem Item(string text, Action onClick)
         {
-            var item = new Forms.ToolStripMenuItem(text) { Tag = tag };
+            var item = new Forms.ToolStripMenuItem(text);
             item.Click += (_, __) =>
             {
                 try { onClick(); }
                 catch (Exception ex) { Log.Error($"Lỗi khi chọn menu \"{text}\"", ex); }
             };
             return item;
-        }
-
-        private static void Check(Forms.ToolStripMenuItem parent, object value)
-        {
-            foreach (var child in parent.DropDownItems)
-            {
-                if (child is Forms.ToolStripMenuItem item)
-                    item.Checked = item.Tag != null && item.Tag.Equals(value);
-            }
         }
 
         // Icon vẽ bằng code để không cần file .ico riêng.
@@ -267,8 +132,8 @@ namespace WallpaperQuote
                 using var path = RoundedRect(new Drawing.Rectangle(2, 4, 28, 24), 5);
                 g.FillPath(brush, path);
                 using var white = new Drawing.SolidBrush(Drawing.Color.White);
-                g.FillEllipse(white, 20, 8, 6, 6);                 // mặt trời
-                g.FillRectangle(white, 7, 19, 14, 3);             // dòng quote
+                g.FillEllipse(white, 20, 8, 6, 6);
+                g.FillRectangle(white, 7, 19, 14, 3);
                 g.FillRectangle(white, 7, 23, 9, 2);
             }
             var handle = bmp.GetHicon();

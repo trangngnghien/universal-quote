@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using WallpaperQuote.Core;
 using WallpaperQuote.Platform;
+using WallpaperQuote.UI;
 using Forms = System.Windows.Forms;
 
 namespace WallpaperQuote
@@ -22,48 +24,67 @@ namespace WallpaperQuote
     }
 
     /// <summary>
-    /// Điều phối toàn bộ app: lịch xoay (W3.1), chọn ngẫu nhiên (W3.2), làm mới thủ công (W3.3),
-    /// ghép và đặt hình nền (W4). Mọi thao tác chạy trên luồng giao diện; việc nặng đẩy sang luồng phụ.
+    /// Điều phối toàn bộ app: nguồn ảnh (W1), quote (W2), lịch xoay & làm mới (W3),
+    /// ghép và đặt hình nền (W4), đồng bộ online (G3). Mọi thao tác chạy trên luồng giao diện.
     /// </summary>
     public sealed class AppHost : IDisposable
     {
+        public const string Version = "0.2.0";
+
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
-        private readonly QuoteLibrary _quotes = new QuoteLibrary();
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
         private readonly ShuffleBag<Quote> _quoteBag = new ShuffleBag<Quote>();
         private readonly DispatcherTimer _imageTimer = new DispatcherTimer();
         private readonly DispatcherTimer _quoteTimer = new DispatcherTimer();
+        private readonly DispatcherTimer _hourly = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
         private readonly DispatcherTimer _rescanDebounce = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         private readonly List<FileSystemWatcher> _watchers = new List<FileSystemWatcher>();
 
         private AppSettings _settings = new AppSettings();
+        private QuoteLibrary _quotes = null!;
+        private OnlineImageStore _online = null!;
         private TrayController? _tray;
-        private List<string> _images = new List<string>();
+        private SettingsWindow? _window;
+        private List<string> _folderImages = new List<string>();
         private ScanResult? _lastScan;
         private string? _currentImage;
         private Quote? _currentQuote;
         private DateTime _lastImageChange = DateTime.MinValue;
         private DateTime _lastQuoteChange = DateTime.MinValue;
+        private DateTime _lastSyncAttempt = DateTime.MinValue;
+        private int _syncAttemptsToday;
+        private DateTime _syncAttemptDay = DateTime.Today;
         private bool _busy;
+        private bool _syncing;
         private Change _pendingAuto = Change.None;
         private int _slot;
         private bool _noImageNotified;
         private bool _disposed;
 
+        /// <summary>Báo cho cửa sổ Cài đặt và tray cập nhật lại hiển thị.</summary>
+        public event Action? StateChanged;
+
         public AppSettings Settings => _settings;
+        public QuoteLibrary Quotes => _quotes;
+        public OnlineImageStore OnlineImages => _online;
         public bool IsPaused => _settings.Paused;
-        public int ImageCount => _images.Count;
+        public bool IsSyncing => _syncing;
+        public int ImageCount => _imageBag.Count;
         public int QuoteCount => _quoteBag.Count;
         public string? CurrentImage => _currentImage;
         public Quote? CurrentQuote => _currentQuote;
         public ScanResult? LastScan => _lastScan;
 
-        public void Start()
+        // ================================================================== Khởi động
+
+        public void Start(bool autostart)
         {
             _settings = SettingsStore.Load();
-            Log.Info("Khởi động app");
+            SettingsStore.Save(_settings);   // lưu lại phần nâng cấp cấu hình (nếu có)
+            _quotes = new QuoteLibrary();
+            _online = new OnlineImageStore();
+            Log.Info($"Khởi động app {Version}{(autostart ? " (cùng Windows)" : "")}");
 
-            // Lưu hình nền gốc ở lần chạy đầu để khôi phục khi gỡ cài (G4).
             if (!_settings.OriginalWallpaperSaved)
             {
                 _settings.OriginalWallpaper = WallpaperSetter.GetCurrent();
@@ -71,7 +92,7 @@ namespace WallpaperQuote
                 SettingsStore.Save(_settings);
             }
 
-            _quoteBag.SetItems(_quotes.Active(_settings.QuoteLanguage));
+            RebuildQuoteBag();
 
             _imageTimer.Tick += async (_, __) => await ChangeAsync(Change.Image, auto: true);
             _quoteTimer.Tick += async (_, __) => await ChangeAsync(Change.Quote, auto: true);
@@ -80,6 +101,8 @@ namespace WallpaperQuote
                 _rescanDebounce.Stop();
                 await RescanAsync();
             };
+            _hourly.Tick += async (_, __) => await BackgroundWorkAsync();
+            _hourly.Start();
 
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
@@ -87,10 +110,27 @@ namespace WallpaperQuote
             _tray = new TrayController(this);
             _tray.Show();
 
-            _ = InitialAsync();
+            EnsureDesktop();
+            _ = InitialAsync(openSettings: !autostart);
         }
 
-        private async Task InitialAsync()
+        /// <summary>Hiện lại biểu tượng desktop nếu đang bị ẩn và tạo lối tắt mở app (chỉ lần đầu).</summary>
+        private void EnsureDesktop()
+        {
+            if (!_settings.DesktopIconsChecked)
+            {
+                _settings.DesktopIconsChecked = true;
+                if (DesktopIntegration.IconsHidden() && DesktopIntegration.ShowIcons())
+                    Log.Info("Đã hiện lại biểu tượng desktop");
+            }
+            if (!_settings.DesktopShortcutCreated)
+            {
+                _settings.DesktopShortcutCreated = DesktopIntegration.CreateShortcut();
+            }
+            SettingsStore.Save(_settings);
+        }
+
+        private async Task InitialAsync(bool openSettings)
         {
             await RescanAsync();
 
@@ -99,16 +139,43 @@ namespace WallpaperQuote
                 _settings.WelcomeShown = true;
                 SettingsStore.Save(_settings);
                 _tray?.Notify("Hình nền & Quote đang chạy",
-                    "Hình nền tự đổi theo lịch. Nháy đúp icon dưới khay để làm mới ngay. Bấm chuột phải để chọn thư mục ảnh.");
+                    "Hình nền tự đổi theo lịch. Nháy đúp icon dưới khay để làm mới ngay. Mở lối tắt \"Hình nền & Quote\" ngoài desktop để vào Cài đặt.");
             }
+
+            if (openSettings) OpenSettings();
 
             if (!_settings.Paused && (_settings.ChangeOnStartup || _currentImage == null))
                 await ChangeAsync(Change.All, auto: false, resetTimers: true);
             else
                 RestartTimers();
+
+            await BackgroundWorkAsync();
         }
 
-        // ------------------------------------------------------------------ Làm mới
+        public void OpenSettings()
+        {
+            if (_disposed) return;
+            if (_window == null)
+            {
+                _window = new SettingsWindow(this);
+                _window.Closed += (_, __) => _window = null;
+                _window.Show();
+            }
+            if (_window.WindowState == System.Windows.WindowState.Minimized)
+                _window.WindowState = System.Windows.WindowState.Normal;
+            _window.Activate();
+            _window.Topmost = true;
+            _window.Topmost = false;
+            _window.Focus();
+        }
+
+        private void NotifyChanged()
+        {
+            _tray?.Refresh();
+            StateChanged?.Invoke();
+        }
+
+        // ================================================================== Làm mới
 
         /// <summary>
         /// Đổi ảnh và/hoặc quote. Lượt tự động đang chờ được gộp và chạy ngay sau lượt hiện tại;
@@ -138,7 +205,7 @@ namespace WallpaperQuote
             finally
             {
                 _busy = false;
-                _tray?.Refresh();
+                NotifyChanged();
             }
 
             if (_pendingAuto != Change.None)
@@ -153,10 +220,10 @@ namespace WallpaperQuote
         {
             var image = _currentImage;
             var quote = _currentQuote;
-            var changeImage = change.HasFlag(Change.Image) || image == null;
+            var changeImage = change.HasFlag(Change.Image) || image == null || !File.Exists(image);
             var changeQuote = change.HasFlag(Change.Quote) || quote == null;
 
-            if (changeImage) image = await PickImageAsync();
+            if (changeImage) image = PickImage();
             if (changeQuote) quote = _quoteBag.Next();
 
             var screen = (Forms.Screen.PrimaryScreen ?? Forms.Screen.AllScreens.First()).Bounds;
@@ -176,8 +243,8 @@ namespace WallpaperQuote
                 {
                     // Ảnh hỏng hoặc đã bị xóa → loại khỏi kho, chọn ảnh khác.
                     Log.Warn(ex.Message);
-                    RemoveImage(ex.ImagePath);
-                    image = await PickImageAsync();
+                    DropImage(ex.ImagePath);
+                    image = PickImage();
                     changeImage = true;
                 }
                 catch (Exception ex)
@@ -206,35 +273,51 @@ namespace WallpaperQuote
             if (changeQuote) _lastQuoteChange = DateTime.Now;
         }
 
-        private async Task<string?> PickImageAsync()
+        private string? PickImage()
         {
-            if (_images.Count == 0 && _settings.Folders.Count > 0) await RescanAsync();
-
             for (var i = 0; i < 50; i++)
             {
                 var next = _imageBag.Next();
                 if (next == null) break;
                 if (File.Exists(next)) return next;
-                RemoveImage(next);
+                DropImage(next);
             }
 
             if (!_noImageNotified)
             {
                 _noImageNotified = true;
                 _tray?.Notify("Chưa có ảnh để hiển thị",
-                    "Bấm chuột phải vào icon dưới khay → Thư mục ảnh → Thêm thư mục. Tạm thời quote hiện trên nền tối.",
+                    "Mở Cài đặt → tab Ảnh để thêm thư mục, link ảnh, hoặc bật ảnh online (cần mạng). Tạm thời quote hiện trên nền tối.",
                     warning: true);
             }
             return null;
         }
 
-        private void RemoveImage(string path)
+        private void DropImage(string path)
         {
-            if (_images.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase)) > 0)
-                _imageBag.SetItems(_images);
+            _folderImages.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+            if (_online.FindByFile(path) != null && !File.Exists(path)) _online.Remove(path);
+            RebuildImageBag();
         }
 
-        // ------------------------------------------------------------------ Thư mục ảnh
+        // ================================================================== Kho ảnh
+
+        /// <summary>Gộp ảnh từ thư mục + link + online (nguồn đang bật) thành kho random.</summary>
+        private void RebuildImageBag()
+        {
+            var pool = new List<string>(_folderImages);
+            pool.AddRange(_settings.Links
+                .Where(l => l.Status == LinkStatus.Ready && l.File != null && File.Exists(l.File))
+                .Select(l => l.File!));
+            pool.AddRange(_online.Items
+                .Where(i => (i.Source == OnlineSource.Nasa && _settings.NasaEnabled)
+                         || (i.Source == OnlineSource.Wikimedia && _settings.WikimediaEnabled))
+                .Where(i => File.Exists(i.File))
+                .Select(i => i.File));
+            var distinct = pool.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            _imageBag.SetItems(distinct);
+            if (distinct.Count > 0) _noImageNotified = false;
+        }
 
         public async Task RescanAsync()
         {
@@ -245,18 +328,19 @@ namespace WallpaperQuote
             {
                 var result = await Sta.Run(() => ImageScanner.Scan(folders, recursive, minWidth, ImageProbe.Width));
                 _lastScan = result;
-                _images = result.Ready;
-                _imageBag.SetItems(_images);
-                if (_images.Count > 0) _noImageNotified = false;
-                Log.Info($"Quét ảnh: {result.Ready.Count} sẵn sàng, {result.TooSmall} nhỏ hơn {minWidth}px, {result.Unreadable} không đọc được");
+                _folderImages = result.Ready;
+                Log.Info($"Quét ảnh: {result.Ready.Count} sẵn sàng, {result.TooSmall} nhỏ hơn {minWidth}px, {result.Heic} HEIC chưa đọc được, {result.Unreadable} lỗi");
             }
             catch (Exception ex)
             {
                 Log.Error("Lỗi quét thư mục ảnh", ex);
             }
+            RebuildImageBag();
             RebuildWatchers();
-            _tray?.Refresh();
+            NotifyChanged();
         }
+
+        // ------------------------------------------------------------------ Thư mục
 
         public async Task AddFolderAsync(string folder)
         {
@@ -270,11 +354,19 @@ namespace WallpaperQuote
             SettingsStore.Save(_settings);
             await RescanAsync();
 
-            var count = _lastScan?.Ready.Count ?? 0;
+            var count = _lastScan != null && _lastScan.PerFolder.TryGetValue(full, out var n) ? n : 0;
             if (count == 0)
-                _tray?.Notify("Không có ảnh hợp lệ", $"Không tìm thấy ảnh jpg/png/bmp/webp rộng từ {_settings.MinImageWidth}px trong thư mục này.", warning: true);
-            else if (_currentImage == null)
+            {
+                var heic = _lastScan?.Heic ?? 0;
+                var hint = heic > 0
+                    ? "Ảnh .HEIC (iPhone) cần cài \"HEIF Image Extensions\" từ Microsoft Store."
+                    : $"Cần ảnh jpg/png/webp/bmp rộng từ {_settings.MinImageWidth}px.";
+                _tray?.Notify("Không có ảnh dùng được trong thư mục này", hint, warning: true);
+            }
+            else if (_currentImage == null || _imageBag.Count == count)
+            {
                 await ChangeAsync(Change.Image, auto: false);
+            }
         }
 
         public async Task RemoveFolderAsync(string folder)
@@ -320,26 +412,367 @@ namespace WallpaperQuote
 
         private void RequestRescan()
         {
-            // Gộp nhiều thay đổi liên tiếp thành 1 lần quét.
             _rescanDebounce.Stop();
             _rescanDebounce.Start();
         }
 
-        // ------------------------------------------------------------------ Lịch & cài đặt
+        // ------------------------------------------------------------------ Link ảnh (W1.2)
+
+        /// <summary>Thêm 1 hoặc nhiều link (mỗi dòng 1 link). Trả về câu báo kết quả để hiện trên cửa sổ.</summary>
+        public async Task<string> AddLinksAsync(string text)
+        {
+            var lines = (text ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+            if (lines.Count == 0) return "Hãy dán ít nhất 1 link ảnh.";
+
+            var added = new List<ImageLink>();
+            var invalid = 0;
+            var duplicate = 0;
+            foreach (var line in lines)
+            {
+                if (!Uri.TryCreate(line, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                {
+                    invalid++;
+                    continue;
+                }
+                if (_settings.Links.Any(l => string.Equals(l.Url, line, StringComparison.OrdinalIgnoreCase)) || added.Any(l => l.Url == line))
+                {
+                    duplicate++;
+                    continue;
+                }
+                added.Add(new ImageLink { Url = line, Status = LinkStatus.Pending });
+            }
+            _settings.Links.AddRange(added);
+            SettingsStore.Save(_settings);
+            NotifyChanged();
+
+            foreach (var link in added) await DownloadLinkAsync(link);
+
+            var parts = new List<string>();
+            if (added.Count > 0) parts.Add($"Đã thêm {added.Count} link");
+            if (invalid > 0) parts.Add($"{invalid} dòng không phải link http/https");
+            if (duplicate > 0) parts.Add($"{duplicate} link đã tồn tại");
+            return string.Join(" · ", parts);
+        }
+
+        public async Task RetryLinkAsync(string url)
+        {
+            var link = _settings.Links.FirstOrDefault(l => l.Url == url);
+            if (link == null) return;
+            link.FailCount = 0;
+            await DownloadLinkAsync(link);
+        }
+
+        public void RemoveLink(string url)
+        {
+            var link = _settings.Links.FirstOrDefault(l => l.Url == url);
+            if (link == null) return;
+            _settings.Links.Remove(link);
+            if (link.File != null && !string.Equals(link.File, _currentImage, StringComparison.OrdinalIgnoreCase))
+            {
+                try { File.Delete(link.File); } catch { }
+            }
+            SettingsStore.Save(_settings);
+            RebuildImageBag();
+            NotifyChanged();
+        }
+
+        private async Task DownloadLinkAsync(ImageLink link)
+        {
+            link.Status = LinkStatus.Pending;
+            link.Error = null;
+            NotifyChanged();
+            try
+            {
+                var dest = Path.Combine(Paths.LinkCacheDir, Net.HashName(link.Url));
+                var file = await Net.DownloadImageAsync(link.Url, dest, CancellationToken.None);
+                var width = ImageProbe.Width(file);
+                if (width == null) throw new DownloadException("File tải về không phải ảnh đọc được");
+                if (width.Value < _settings.MinImageWidth)
+                {
+                    try { File.Delete(file); } catch { }
+                    throw new DownloadException($"Ảnh rộng {width}px, nhỏ hơn {_settings.MinImageWidth}px");
+                }
+                link.File = file;
+                link.Status = LinkStatus.Ready;
+                link.FailCount = 0;
+            }
+            catch (DownloadException ex) when (ex.Offline)
+            {
+                link.Status = LinkStatus.Pending;
+                link.Error = "Đang offline · sẽ tự tải khi có mạng";
+            }
+            catch (Exception ex)
+            {
+                link.FailCount++;
+                link.Status = LinkStatus.Error;
+                link.Error = ex is DownloadException ? ex.Message : "Không tải được ảnh";
+                Log.Warn($"Link ảnh lỗi: {link.Error}");
+            }
+            SettingsStore.Save(_settings);
+            RebuildImageBag();
+            NotifyChanged();
+
+            if (link.Status == LinkStatus.Ready && _currentImage == null) await ChangeAsync(Change.Image, auto: false);
+        }
+
+        // ------------------------------------------------------------------ Online (W1.3, W2.2)
+
+        public void SetNasaEnabled(bool value)
+        {
+            _settings.NasaEnabled = value;
+            SettingsStore.Save(_settings);
+            RebuildImageBag();
+            NotifyChanged();
+            if (value && _online.Count(OnlineSource.Nasa) == 0) _ = SyncOnlineAsync(force: true);
+        }
+
+        public void SetWikimediaEnabled(bool value)
+        {
+            _settings.WikimediaEnabled = value;
+            SettingsStore.Save(_settings);
+            RebuildImageBag();
+            NotifyChanged();
+            if (value && _online.Count(OnlineSource.Wikimedia) == 0) _ = SyncOnlineAsync(force: true);
+        }
+
+        public void SetNasaApiKey(string key)
+        {
+            _settings.NasaApiKey = string.IsNullOrWhiteSpace(key) ? "DEMO_KEY" : key.Trim();
+            SettingsStore.Save(_settings);
+            NotifyChanged();
+        }
+
+        /// <summary>Việc nền định kỳ: đồng bộ online 1 lần/ngày, tải lại link đang chờ.</summary>
+        private async Task BackgroundWorkAsync()
+        {
+            if (_disposed) return;
+            if (_settings.Links.Any(l => l.Status == LinkStatus.Pending) && Net.IsOnline())
+            {
+                foreach (var link in _settings.Links.Where(l => l.Status == LinkStatus.Pending).ToList())
+                    await DownloadLinkAsync(link);
+            }
+            await SyncOnlineAsync(force: false);
+        }
+
+        /// <summary>
+        /// Đồng bộ ảnh NASA, Wikimedia và quote online theo lô (tối đa 1 lần/ngày, BR W1.3).
+        /// Lỗi mạng → thử lại sau 30 phút, tối đa 3 lần/ngày; không hiện popup lỗi.
+        /// </summary>
+        public async Task SyncOnlineAsync(bool force)
+        {
+            if (_syncing || _disposed) return;
+            if (!_settings.NasaEnabled && !_settings.WikimediaEnabled && !_settings.UseOnlineQuotes) return;
+
+            if (_syncAttemptDay != DateTime.Today) { _syncAttemptDay = DateTime.Today; _syncAttemptsToday = 0; }
+            if (!force)
+            {
+                if (_settings.LastOnlineSync.HasValue && DateTime.Now - _settings.LastOnlineSync.Value < TimeSpan.FromHours(24)) return;
+                if (_syncAttemptsToday >= 3) return;
+                if (DateTime.Now - _lastSyncAttempt < TimeSpan.FromMinutes(30)) return;
+            }
+            if (!Net.IsOnline())
+            {
+                _settings.LastOnlineSyncMessage = "Đang offline · sẽ đồng bộ khi có mạng";
+                NotifyChanged();
+                return;
+            }
+
+            _syncing = true;
+            _lastSyncAttempt = DateTime.Now;
+            _syncAttemptsToday++;
+            NotifyChanged();
+
+            var parts = new List<string>();
+            var anyOk = false;
+            const int perSource = 10;
+            try
+            {
+                if (_settings.NasaEnabled)
+                {
+                    try
+                    {
+                        var fetched = await Net.FetchNasaAsync(_settings.NasaApiKey, perSource, CancellationToken.None);
+                        var added = await DownloadCandidatesAsync(fetched.Accepted, perSource);
+                        parts.Add($"NASA +{added} ảnh" + (fetched.RejectedLicense > 0 ? $" (loại {fetched.RejectedLicense} ảnh có bản quyền)" : ""));
+                        anyOk = true;
+                    }
+                    catch (RateLimitException)
+                    {
+                        parts.Add("NASA: vượt hạn mức, thử lại ngày mai (nên dùng API key riêng)");
+                        anyOk = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        parts.Add("NASA: lỗi kết nối");
+                        Log.Warn($"Đồng bộ NASA lỗi: {ex.Message}");
+                    }
+                }
+
+                if (_settings.WikimediaEnabled)
+                {
+                    try
+                    {
+                        var skip = new HashSet<string>(_online.Items.Select(i => i.Id));
+                        var fetched = await Net.FetchWikimediaAsync(perSource, skip, CancellationToken.None);
+                        var added = await DownloadCandidatesAsync(fetched.Accepted, perSource);
+                        parts.Add($"Wikimedia +{added} ảnh" + (fetched.RejectedLicense > 0 ? $" (loại {fetched.RejectedLicense} ảnh không phải PD/CC0)" : ""));
+                        anyOk = true;
+                    }
+                    catch (RateLimitException)
+                    {
+                        parts.Add("Wikimedia: vượt hạn mức, thử lại sau");
+                        anyOk = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        parts.Add("Wikimedia: lỗi kết nối");
+                        Log.Warn($"Đồng bộ Wikimedia lỗi: {ex.Message}");
+                    }
+                }
+
+                if (_settings.UseOnlineQuotes)
+                {
+                    try
+                    {
+                        var catalog = await Net.FetchQuoteCatalogAsync(CancellationToken.None);
+                        if (catalog != null)
+                        {
+                            if (_quotes.ApplyOnlineCatalog(catalog)) RebuildQuoteBag();
+                            _settings.LastQuoteSync = DateTime.Now;
+                            parts.Add($"{_quotes.Online.Count} quote online");
+                            anyOk = true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn($"Đồng bộ quote online lỗi: {ex.Message}");
+                    }
+                }
+
+                if (anyOk) _settings.LastOnlineSync = DateTime.Now;
+                _settings.LastOnlineSyncMessage = $"Đồng bộ lúc {DateTime.Now:HH:mm dd/MM}: " + string.Join(" · ", parts);
+                _online.Evict((long)_settings.CacheLimitMb * 1024 * 1024, _currentImage,
+                    _settings.Links.Where(l => l.File != null).Select(l => l.File!));
+                SettingsStore.Save(_settings);
+                RebuildImageBag();
+            }
+            finally
+            {
+                _syncing = false;
+                NotifyChanged();
+            }
+
+            if (_currentImage == null && _imageBag.Count > 0) await ChangeAsync(Change.Image, auto: false);
+        }
+
+        private async Task<int> DownloadCandidatesAsync(List<OnlineCandidate> candidates, int max)
+        {
+            var added = 0;
+            foreach (var c in candidates)
+            {
+                if (added >= max) break;
+                if (_online.Contains(c.Id)) continue;
+                try
+                {
+                    var dest = Path.Combine(Paths.OnlineCacheDir, Net.HashName(c.Id));
+                    var file = await Net.DownloadImageAsync(c.ImageUrl, dest, CancellationToken.None);
+                    var width = ImageProbe.Width(file);
+                    if (width == null || width.Value < _settings.MinImageWidth)
+                    {
+                        try { File.Delete(file); } catch { }
+                        continue;
+                    }
+                    _online.Add(new OnlineImage
+                    {
+                        Id = c.Id,
+                        Source = c.Source,
+                        File = file,
+                        Title = c.Title,
+                        Author = c.Author,
+                        License = c.License,
+                        PageUrl = c.PageUrl,
+                        Date = c.Date
+                    });
+                    added++;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"Không tải được ảnh online {c.Id}: {ex.Message}");
+                }
+            }
+            return added;
+        }
+
+        public void ClearCache()
+        {
+            _online.Clear(_currentImage);
+            RebuildImageBag();
+            NotifyChanged();
+        }
+
+        // ================================================================== Quote
+
+        private void RebuildQuoteBag() => _quoteBag.SetItems(_quotes.Active(_settings));
+
+        public void SetQuoteLanguage(string language)
+        {
+            _settings.QuoteLanguage = language;
+            SettingsStore.Save(_settings);
+            RebuildQuoteBag();
+            NotifyChanged();
+        }
+
+        public void SetQuoteGroup(string group, bool enabled)
+        {
+            if (group == QuoteGroup.BuiltIn) _settings.UseBuiltInQuotes = enabled;
+            else if (group == QuoteGroup.User) _settings.UseUserQuotes = enabled;
+            else if (group == QuoteGroup.Online) _settings.UseOnlineQuotes = enabled;
+            SettingsStore.Save(_settings);
+            RebuildQuoteBag();
+            NotifyChanged();
+            if (!_settings.UseBuiltInQuotes && !_settings.UseUserQuotes && !_settings.UseOnlineQuotes)
+                _tray?.Notify("Hình nền sẽ không có quote", "Bạn đã tắt mọi nhóm quote.", warning: true);
+            if (group == QuoteGroup.Online && enabled && _quotes.Online.Count == 0) _ = SyncOnlineAsync(force: true);
+        }
+
+        public void AddUserQuote(string text, string? author, string? source, string lang)
+        {
+            _quotes.AddUser(text, author, source, lang);
+            RebuildQuoteBag();
+            NotifyChanged();
+        }
+
+        public void UpdateUserQuote(string id, string text, string? author, string? source, string lang)
+        {
+            _quotes.UpdateUser(id, text, author, source, lang);
+            RebuildQuoteBag();
+            NotifyChanged();
+        }
+
+        public void DeleteUserQuote(string id)
+        {
+            _quotes.DeleteUser(id);
+            RebuildQuoteBag();
+            NotifyChanged();
+        }
+
+        // ================================================================== Lịch & cài đặt
 
         public void SetPaused(bool paused)
         {
             _settings.Paused = paused;
             SettingsStore.Save(_settings);
             RestartTimers();
-            _tray?.Refresh();
+            NotifyChanged();
         }
 
         public void SetImageInterval(int minutes)
         {
             _settings.ImageIntervalMinutes = minutes;
             SettingsStore.Save(_settings);
-            RestartTimer(_imageTimer, minutes);   // áp dụng từ lượt kế tiếp
+            RestartTimer(_imageTimer, minutes);
+            NotifyChanged();
         }
 
         public void SetQuoteInterval(int minutes)
@@ -347,14 +780,14 @@ namespace WallpaperQuote
             _settings.QuoteIntervalMinutes = minutes;
             SettingsStore.Save(_settings);
             RestartTimer(_quoteTimer, minutes);
+            NotifyChanged();
         }
 
-        public void SetQuoteLanguage(string language)
+        public void SetChangeOnStartup(bool value)
         {
-            _settings.QuoteLanguage = language;
+            _settings.ChangeOnStartup = value;
             SettingsStore.Save(_settings);
-            _quoteBag.SetItems(_quotes.Active(language));
-            _tray?.Refresh();
+            NotifyChanged();
         }
 
         public async Task SetFitModeAsync(string fitMode)
@@ -364,10 +797,11 @@ namespace WallpaperQuote
             await ChangeAsync(Change.Rerender, auto: false);
         }
 
-        public void SetChangeOnStartup(bool value)
+        public bool SetStartup(bool enabled)
         {
-            _settings.ChangeOnStartup = value;
-            SettingsStore.Save(_settings);
+            var ok = StartupRegistration.Set(enabled);
+            NotifyChanged();
+            return ok;
         }
 
         private void RestartTimers()
@@ -386,7 +820,27 @@ namespace WallpaperQuote
         public DateTime? NextImageChange =>
             _settings.Paused || _lastImageChange == DateTime.MinValue ? (DateTime?)null : _lastImageChange.AddMinutes(_settings.ImageIntervalMinutes);
 
-        // ------------------------------------------------------------------ Sự kiện hệ thống
+        public DateTime? NextQuoteChange =>
+            _settings.Paused || _lastQuoteChange == DateTime.MinValue ? (DateTime?)null : _lastQuoteChange.AddMinutes(_settings.QuoteIntervalMinutes);
+
+        /// <summary>Mô tả nguồn của ảnh đang hiển thị (thư mục / link / online + giấy phép).</summary>
+        public string DescribeCurrentImage()
+        {
+            var image = _currentImage;
+            if (image == null) return "Chưa có ảnh (đang dùng nền tối)";
+            var online = _online.FindByFile(image);
+            if (online != null)
+            {
+                var src = online.Source == OnlineSource.Nasa ? "NASA – Ảnh thiên văn trong ngày" : "Wikimedia Commons – Ảnh trong ngày";
+                return $"{online.Title}\nNguồn: {src}\nTác giả: {online.Author ?? "Không rõ"}\nGiấy phép: {online.License}" +
+                       (online.PageUrl != null ? $"\nTrang gốc: {online.PageUrl}" : "");
+            }
+            var link = _settings.Links.FirstOrDefault(l => string.Equals(l.File, image, StringComparison.OrdinalIgnoreCase));
+            if (link != null) return $"Ảnh qua link\n{link.Url}";
+            return $"{Path.GetFileName(image)}\nThư mục: {Path.GetDirectoryName(image)}";
+        }
+
+        // ================================================================== Sự kiện hệ thống
 
         private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
         {
@@ -402,12 +856,12 @@ namespace WallpaperQuote
                 if (now - _lastQuoteChange >= TimeSpan.FromMinutes(_settings.QuoteIntervalMinutes)) missed |= Change.Quote;
                 if (missed != Change.None) await ChangeAsync(missed, auto: false);
                 else RestartTimers();
+                await BackgroundWorkAsync();
             });
         }
 
         private void OnDisplaySettingsChanged(object? sender, EventArgs e)
         {
-            // Đổi độ phân giải / cắm thêm màn hình → ghép lại cho đúng kích thước.
             _dispatcher.InvokeAsync(async () =>
             {
                 await Task.Delay(2000);
@@ -417,10 +871,10 @@ namespace WallpaperQuote
 
         public void Exit()
         {
-            // Chạy sau khi menu đóng hẳn, tránh hủy menu ngay trong lúc nó đang xử lý cú bấm.
-            // Thoát app giữ nguyên hình nền đang hiển thị.
+            // Chạy sau khi menu đóng hẳn. Thoát app giữ nguyên hình nền đang hiển thị.
             _dispatcher.BeginInvoke(new Action(() =>
             {
+                _window?.Close();
                 Dispose();
                 System.Windows.Application.Current?.Shutdown();
             }));
@@ -432,6 +886,7 @@ namespace WallpaperQuote
             _disposed = true;
             _imageTimer.Stop();
             _quoteTimer.Stop();
+            _hourly.Stop();
             _rescanDebounce.Stop();
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;

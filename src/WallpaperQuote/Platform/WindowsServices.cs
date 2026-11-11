@@ -69,6 +69,9 @@ namespace WallpaperQuote.Platform
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string ValueName = "WallpaperQuote";
 
+        /// <summary>Tham số khi Windows tự mở app: chạy ngầm, không bật cửa sổ Cài đặt.</summary>
+        public const string AutostartArg = "--autostart";
+
         public static bool IsEnabled()
         {
             try
@@ -92,7 +95,7 @@ namespace WallpaperQuote.Platform
                 {
                     var exe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
                     if (string.IsNullOrEmpty(exe)) return false;
-                    key.SetValue(ValueName, $"\"{exe}\"");
+                    key.SetValue(ValueName, $"\"{exe}\" {AutostartArg}");
                 }
                 else
                 {
@@ -131,8 +134,107 @@ namespace WallpaperQuote.Platform
         public static Task Run(Action work) => Run<bool>(() => { work(); return true; });
     }
 
+    /// <summary>Lối tắt ngoài desktop và hiện lại biểu tượng desktop khi đang bị ẩn.</summary>
+    public static class DesktopIntegration
+    {
+        private const string ShortcutName = "Hình nền & Quote.lnk";
+        private const uint WM_COMMAND = 0x0111;
+        private const int ToggleDesktopIcons = 0x7402;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindWindow(string? className, string? windowName);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string? className, string? windowName);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+        public static string ShortcutPath =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), ShortcutName);
+
+        public static bool ShortcutExists() => File.Exists(ShortcutPath);
+
+        /// <summary>Tạo lối tắt "Hình nền & Quote" ngoài desktop trỏ tới file exe đang chạy.</summary>
+        public static bool CreateShortcut()
+        {
+            try
+            {
+                var exe = Environment.ProcessPath;
+                if (string.IsNullOrEmpty(exe)) return false;
+                var shellType = Type.GetTypeFromProgID("WScript.Shell");
+                if (shellType == null) return false;
+                dynamic shell = Activator.CreateInstance(shellType)!;
+                dynamic link = shell.CreateShortcut(ShortcutPath);
+                link.TargetPath = exe;
+                link.WorkingDirectory = Path.GetDirectoryName(exe);
+                link.Description = "Mở cài đặt Hình nền & Quote";
+                link.IconLocation = exe + ",0";
+                link.Save();
+                Marshal.FinalReleaseComObject(link);
+                Marshal.FinalReleaseComObject(shell);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Không tạo được lối tắt ngoài desktop", ex);
+                return false;
+            }
+        }
+
+        /// <summary>Windows đang ẩn biểu tượng desktop (chuột phải desktop → View → bỏ tick "Show desktop icons").</summary>
+        public static bool IconsHidden()
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+                return key?.GetValue("HideIcons") is int v && v == 1;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>Hiện lại biểu tượng desktop nếu đang bị ẩn. Không làm gì nếu đang hiện.</summary>
+        public static bool ShowIcons()
+        {
+            if (!IconsHidden()) return true;
+            var view = FindDefView();
+            if (view == IntPtr.Zero) return false;
+            SendMessage(view, WM_COMMAND, (IntPtr)ToggleDesktopIcons, IntPtr.Zero);
+            return true;
+        }
+
+        private static IntPtr FindDefView()
+        {
+            var progman = FindWindow("Progman", null);
+            var view = FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
+            if (view != IntPtr.Zero) return view;
+            var worker = IntPtr.Zero;
+            while ((worker = FindWindowEx(IntPtr.Zero, worker, "WorkerW", null)) != IntPtr.Zero)
+            {
+                view = FindWindowEx(worker, IntPtr.Zero, "SHELLDLL_DefView", null);
+                if (view != IntPtr.Zero) return view;
+            }
+            return IntPtr.Zero;
+        }
+    }
+
     public static class Shell
     {
+        public static void OpenUrl(string url)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Không mở được link", ex);
+            }
+        }
+
         public static void OpenFolder(string folder)
         {
             try

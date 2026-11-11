@@ -7,7 +7,16 @@ using System.Text.Json;
 
 namespace WallpaperQuote.Core
 {
-    /// <summary>Thư viện quote (W2.1). M1: bộ quote mặc định đóng gói sẵn + lọc ngôn ngữ.</summary>
+    public sealed class OnlineQuoteCatalog
+    {
+        public int Version { get; set; }
+        public List<Quote> Quotes { get; set; } = new List<Quote>();
+    }
+
+    /// <summary>
+    /// Thư viện quote (W2.1, W2.2): 3 nhóm Mặc định / Cá nhân / Online, lọc ngôn ngữ,
+    /// thêm–sửa–xóa quote cá nhân, chống trùng theo nội dung.
+    /// </summary>
     public sealed class QuoteLibrary
     {
         public const int MaxTextLength = 300;
@@ -15,20 +24,105 @@ namespace WallpaperQuote.Core
         public const int MaxSourceLength = 100;
 
         private readonly List<Quote> _builtIn;
+        private readonly List<Quote> _user;
+        private OnlineQuoteCatalog _online;
 
         public QuoteLibrary()
         {
             _builtIn = LoadBuiltIn();
+            _user = LoadUser();
+            _online = JsonFile.Read<OnlineQuoteCatalog>(Paths.OnlineQuotesFile) ?? new OnlineQuoteCatalog();
+            Tag(_online.Quotes, QuoteGroup.Online);
         }
 
-        public int BuiltInCount => _builtIn.Count;
+        public IReadOnlyList<Quote> BuiltIn => _builtIn;
+        public IReadOnlyList<Quote> User => _user;
+        public IReadOnlyList<Quote> Online => _online.Quotes;
+        public int OnlineVersion => _online.Version;
 
-        public IReadOnlyList<Quote> Active(string language)
+        public IReadOnlyList<Quote> All => _builtIn.Concat(_user).Concat(_online.Quotes).ToList();
+
+        /// <summary>Quote được phép random theo nhóm đang bật và ngôn ngữ đã chọn.</summary>
+        public IReadOnlyList<Quote> Active(AppSettings s)
         {
-            IEnumerable<Quote> all = _builtIn;
-            if (language == QuoteLanguage.Vietnamese || language == QuoteLanguage.English)
-                all = all.Where(q => q.Lang == language);
-            return all.ToList();
+            var list = new List<Quote>();
+            if (s.UseBuiltInQuotes) list.AddRange(_builtIn);
+            if (s.UseUserQuotes) list.AddRange(_user);
+            if (s.UseOnlineQuotes) list.AddRange(_online.Quotes);
+            if (s.QuoteLanguage == QuoteLanguage.Vietnamese || s.QuoteLanguage == QuoteLanguage.English)
+                list = list.Where(q => q.Lang == s.QuoteLanguage).ToList();
+            return list;
+        }
+
+        /// <summary>Kiểm tra quote nhập tay. Trả về câu báo lỗi, hoặc null nếu hợp lệ.</summary>
+        public string? Validate(string text, string? author, string? source, string? editingId)
+        {
+            var t = (text ?? "").Trim();
+            if (t.Length == 0) return "Vui lòng nhập nội dung quote.";
+            if (t.Length > MaxTextLength) return $"Nội dung tối đa {MaxTextLength} ký tự (hiện {t.Length}).";
+            if ((author ?? "").Trim().Length > MaxAuthorLength) return $"Tác giả tối đa {MaxAuthorLength} ký tự.";
+            var src = (source ?? "").Trim();
+            if (src.Length > MaxSourceLength) return $"Nguồn trích dẫn tối đa {MaxSourceLength} ký tự.";
+            if (src.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || src.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return "Nguồn trích dẫn nhập dạng chữ (tên sách, tác phẩm…), không nhập link.";
+            var key = NormalizeForCompare(t);
+            if (All.Any(q => q.Id != editingId && NormalizeForCompare(q.Text) == key))
+                return "Quote này đã có trong thư viện.";
+            return null;
+        }
+
+        public Quote AddUser(string text, string? author, string? source, string lang)
+        {
+            var q = new Quote
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Text = text.Trim(),
+                Author = Clean(author),
+                Source = Clean(source),
+                Lang = lang == QuoteLanguage.English ? QuoteLanguage.English : QuoteLanguage.Vietnamese,
+                Group = QuoteGroup.User
+            };
+            _user.Add(q);
+            SaveUser();
+            return q;
+        }
+
+        public void UpdateUser(string id, string text, string? author, string? source, string lang)
+        {
+            var q = _user.FirstOrDefault(x => x.Id == id);
+            if (q == null) return;
+            q.Text = text.Trim();
+            q.Author = Clean(author);
+            q.Source = Clean(source);
+            q.Lang = lang == QuoteLanguage.English ? QuoteLanguage.English : QuoteLanguage.Vietnamese;
+            SaveUser();
+        }
+
+        public void DeleteUser(string id)
+        {
+            if (_user.RemoveAll(x => x.Id == id) > 0) SaveUser();
+        }
+
+        /// <summary>Gộp danh mục quote online mới tải về (chỉ khi phiên bản mới hơn), loại trùng với quote đã có.</summary>
+        public bool ApplyOnlineCatalog(OnlineQuoteCatalog catalog)
+        {
+            if (catalog.Version <= _online.Version && _online.Quotes.Count > 0) return false;
+            var existing = new HashSet<string>(_builtIn.Concat(_user).Select(q => NormalizeForCompare(q.Text)));
+            var clean = new List<Quote>();
+            var i = 0;
+            foreach (var q in catalog.Quotes ?? new List<Quote>())
+            {
+                if (!IsValid(q)) continue;
+                if (!existing.Add(NormalizeForCompare(q.Text))) continue;
+                q.Text = q.Text.Trim();
+                if (string.IsNullOrWhiteSpace(q.Id)) q.Id = $"online-{catalog.Version}-{i}";
+                i++;
+                clean.Add(q);
+            }
+            Tag(clean, QuoteGroup.Online);
+            _online = new OnlineQuoteCatalog { Version = catalog.Version, Quotes = clean };
+            JsonFile.Write(Paths.OnlineQuotesFile, _online);
+            return true;
         }
 
         public static bool IsValid(Quote q) =>
@@ -40,7 +134,27 @@ namespace WallpaperQuote.Core
 
         /// <summary>So trùng chỉ theo nội dung, bỏ khoảng trắng thừa, không phân biệt hoa thường (không so tác giả, nguồn).</summary>
         public static string NormalizeForCompare(string text) =>
-            string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
+            string.Join(" ", (text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
+
+        private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        private static void Tag(IEnumerable<Quote> quotes, string group)
+        {
+            foreach (var q in quotes) q.Group = group;
+        }
+
+        private void SaveUser() => JsonFile.Write(Paths.UserQuotesFile, _user);
+
+        private static List<Quote> LoadUser()
+        {
+            var list = JsonFile.Read<List<Quote>>(Paths.UserQuotesFile) ?? new List<Quote>();
+            foreach (var q in list)
+            {
+                if (string.IsNullOrWhiteSpace(q.Id)) q.Id = Guid.NewGuid().ToString("N");
+                q.Group = QuoteGroup.User;
+            }
+            return list.Where(q => !string.IsNullOrWhiteSpace(q.Text)).ToList();
+        }
 
         private static List<Quote> LoadBuiltIn()
         {
@@ -56,11 +170,14 @@ namespace WallpaperQuote.Core
                 var list = JsonSerializer.Deserialize<List<Quote>>(stream, Json.Options) ?? new List<Quote>();
                 var seen = new HashSet<string>();
                 var result = new List<Quote>();
+                var i = 0;
                 foreach (var q in list)
                 {
                     if (!IsValid(q)) continue;
                     if (!seen.Add(NormalizeForCompare(q.Text))) continue;
                     q.Text = q.Text.Trim();
+                    q.Id = $"builtin-{i++}";
+                    q.Group = QuoteGroup.BuiltIn;
                     result.Add(q);
                 }
                 return result;
@@ -73,18 +190,104 @@ namespace WallpaperQuote.Core
         }
     }
 
+    /// <summary>Danh sách ảnh online đã tải (W1.3) + dọn bộ nhớ đệm khi vượt giới hạn (G2).</summary>
+    public sealed class OnlineImageStore
+    {
+        private List<OnlineImage> _items;
+
+        public OnlineImageStore()
+        {
+            _items = JsonFile.Read<List<OnlineImage>>(Paths.OnlineIndexFile) ?? new List<OnlineImage>();
+            _items = _items.Where(i => File.Exists(i.File)).ToList();
+        }
+
+        public IReadOnlyList<OnlineImage> Items => _items;
+
+        public bool Contains(string id) => _items.Any(i => i.Id == id);
+
+        public OnlineImage? FindByFile(string file) =>
+            _items.FirstOrDefault(i => string.Equals(i.File, file, StringComparison.OrdinalIgnoreCase));
+
+        public int Count(string source) => _items.Count(i => i.Source == source);
+
+        public void Add(OnlineImage image)
+        {
+            _items.RemoveAll(i => i.Id == image.Id);
+            _items.Add(image);
+            Save();
+        }
+
+        public void Remove(string file)
+        {
+            if (_items.RemoveAll(i => string.Equals(i.File, file, StringComparison.OrdinalIgnoreCase)) > 0) Save();
+        }
+
+        /// <summary>Xóa ảnh tải về cũ nhất cho tới khi bộ nhớ đệm dưới giới hạn. Không xóa ảnh đang làm hình nền.</summary>
+        public void Evict(long limitBytes, string? protectFile, IEnumerable<string> extraCacheFiles)
+        {
+            try
+            {
+                var files = new DirectoryInfo(Paths.CacheRoot).GetFiles("*", SearchOption.AllDirectories)
+                    .OrderBy(f => f.LastWriteTimeUtc).ToList();
+                var total = files.Sum(f => f.Length);
+                var keep = new HashSet<string>(extraCacheFiles, StringComparer.OrdinalIgnoreCase);
+                foreach (var f in files)
+                {
+                    if (total <= limitBytes) break;
+                    if (string.Equals(f.FullName, protectFile, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (keep.Contains(f.FullName)) continue;   // ảnh link do người dùng thêm: giữ lại
+                    total -= f.Length;
+                    try { f.Delete(); } catch { }
+                    Remove(f.FullName);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Không dọn được bộ nhớ đệm: {ex.Message}");
+            }
+        }
+
+        public void Clear(string? protectFile)
+        {
+            foreach (var item in _items.ToList())
+            {
+                if (string.Equals(item.File, protectFile, StringComparison.OrdinalIgnoreCase)) continue;
+                try { File.Delete(item.File); } catch { }
+                _items.Remove(item);
+            }
+            Save();
+        }
+
+        public static long CacheSizeBytes()
+        {
+            try
+            {
+                return new DirectoryInfo(Paths.CacheRoot).GetFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private void Save() => JsonFile.Write(Paths.OnlineIndexFile, _items);
+    }
+
     public sealed class ScanResult
     {
         public List<string> Ready { get; } = new List<string>();
         public int TooSmall { get; set; }
         public int Unreadable { get; set; }
+        public int Heic { get; set; }
         public List<string> MissingFolders { get; } = new List<string>();
+        public Dictionary<string, int> PerFolder { get; } = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Quét ảnh trong các thư mục (W1.1). Không sửa, di chuyển, xóa file gốc.</summary>
     public static class ImageScanner
     {
-        public static readonly string[] Extensions = { ".jpg", ".jpeg", ".png", ".bmp", ".webp" };
+        public static readonly string[] Extensions =
+            { ".jpg", ".jpeg", ".jfif", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".heic", ".heif" };
 
         /// <param name="probeWidth">Hàm đọc chiều ngang ảnh (pixel); trả null nếu không đọc được.</param>
         public static ScanResult Scan(IEnumerable<string> folders, bool recursive, int minWidth, Func<string, int?> probeWidth)
@@ -93,6 +296,7 @@ namespace WallpaperQuote.Core
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var folder in folders)
             {
+                result.PerFolder[folder] = 0;
                 if (!Directory.Exists(folder))
                 {
                     result.MissingFolders.Add(folder);
@@ -124,9 +328,15 @@ namespace WallpaperQuote.Core
                     if (!seen.Add(full)) continue; // một file chỉ tính 1 lần (BR W1.1)
 
                     var width = probeWidth(full);
-                    if (width == null) { result.Unreadable++; continue; }
+                    if (width == null)
+                    {
+                        if (ext == ".heic" || ext == ".heif") result.Heic++;
+                        else result.Unreadable++;
+                        continue;
+                    }
                     if (width.Value < minWidth) { result.TooSmall++; continue; }
                     result.Ready.Add(full);
+                    result.PerFolder[folder] = result.PerFolder[folder] + 1;
                 }
             }
             return result;

@@ -1,9 +1,32 @@
-# Hình nền & Quote – M1 (bản lõi)
+# Hình nền & Quote – bản 0.2 (M1 + M2 + M3)
 
 App Windows tự đổi hình nền máy tính kèm một câu quote ngẫu nhiên, theo lịch bạn đặt.
-Đây là **mốc M1** trong lộ trình MVP: phần lõi đã dùng được hằng ngày, điều khiển qua icon dưới khay hệ thống.
 
-## 1. Build ra file .exe (làm 1 lần)
+## Tải và chạy (không cần cài gì)
+
+1. Vào **Releases** của repo này → bản mới nhất → tải **WallpaperQuote.exe**.
+2. Bấm đúp để chạy. Nếu Windows hiện *"Windows protected your PC"* → **More info → Run anyway**.
+3. Cửa sổ **Cài đặt** tự mở; app tạo lối tắt **"Hình nền & Quote"** ngoài desktop để mở lại Cài đặt bất cứ lúc nào.
+4. Icon xanh dưới khay hệ thống: nháy đúp = làm mới; chuột phải = menu.
+
+## Bản 0.2 có gì mới
+
+- **Cửa sổ Cài đặt 4 tab**: Ảnh / Quote / Lịch xoay / Chung.
+- **Ảnh qua đường link**: dán 1 hoặc nhiều link ảnh trực tiếp (http/https), có trạng thái Sẵn sàng / Lỗi / Chờ tải, Thử lại, Xóa.
+- **Ảnh online public**: NASA (ảnh thiên văn) và Wikimedia Commons (ảnh trong ngày), chỉ nhận ảnh Public Domain / CC0, đồng bộ 1 lần/ngày, tối đa 10 ảnh mỗi nguồn. Có ô nhập NASA API key riêng.
+- **Quote cá nhân**: thêm / sửa / xóa, có tác giả, nguồn trích dẫn, ngôn ngữ; chống trùng; lọc theo nhóm và tìm kiếm.
+- **Quote online**: tải từ `catalog/quotes.json` trong repo này (sửa file đó để thêm quote cho mọi máy).
+- Nhận thêm ảnh **.HEIC** (cần cài *HEIF Image Extensions* từ Microsoft Store), **.jfif, .gif, .tif**; hạ ngưỡng ảnh tối thiểu còn **800px**.
+- **Desktop**: tự hiện lại biểu tượng desktop nếu Windows đang ẩn; tạo lối tắt mở app; mở app lần 2 sẽ bật cửa sổ Cài đặt.
+
+> App không bao giờ xóa, di chuyển hay ẩn file của bạn. Nếu biểu tượng desktop bị ẩn: Cài đặt → tab Chung → **Hiện biểu tượng trên desktop**,
+> hoặc chuột phải desktop → View → tick *Show desktop icons*.
+
+---
+
+## Phụ lục: tự build từ code
+
+### Build ra file .exe trên máy Windows
 
 Cần một máy Windows 10/11 (64-bit).
 

@@ -11,7 +11,8 @@
     <RootNamespace>WallpaperQuote</RootNamespace>
     <AssemblyName>WallpaperQuote</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Product>Hình nền &amp; Quote</Product>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>

@@ -20,6 +20,12 @@ namespace WallpaperQuote.Core
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppFolderName));
 
         public static string SettingsFile => Path.Combine(DataDir, "settings.json");
+        public static string UserQuotesFile => Path.Combine(DataDir, "quotes.json");
+        public static string OnlineQuotesFile => Path.Combine(LocalDir, "quotes-online.json");
+        public static string OnlineIndexFile => Path.Combine(LocalDir, "online-images.json");
+        public static string OnlineCacheDir => Ensure(Path.Combine(LocalDir, "cache", "online"));
+        public static string LinkCacheDir => Ensure(Path.Combine(LocalDir, "cache", "links"));
+        public static string CacheRoot => Ensure(Path.Combine(LocalDir, "cache"));
         public static string LogFile => Path.Combine(LocalDir, "app.log");
 
         /// <summary>Luân phiên 2 file để Windows không dùng lại ảnh cũ trong bộ nhớ đệm.</summary>
@@ -78,6 +84,40 @@ namespace WallpaperQuote.Core
             ReadCommentHandling = JsonCommentHandling.Skip,
             AllowTrailingCommas = true
         };
+    }
+
+    /// <summary>Đọc/ghi file JSON an toàn: ghi file tạm rồi thay thế, lỗi thì trả mặc định.</summary>
+    public static class JsonFile
+    {
+        public static T? Read<T>(string file) where T : class
+        {
+            try
+            {
+                if (!File.Exists(file)) return null;
+                return JsonSerializer.Deserialize<T>(File.ReadAllText(file, Encoding.UTF8), Json.Options);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Không đọc được {Path.GetFileName(file)}", ex);
+                try { File.Copy(file, file + ".broken", true); } catch { }
+                return null;
+            }
+        }
+
+        public static void Write<T>(string file, T value)
+        {
+            try
+            {
+                var temp = file + ".tmp";
+                File.WriteAllText(temp, JsonSerializer.Serialize(value, Json.Options), Encoding.UTF8);
+                if (File.Exists(file)) File.Replace(temp, file, null);
+                else File.Move(temp, file);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Không lưu được {Path.GetFileName(file)}", ex);
+            }
+        }
     }
 
     public static class SettingsStore

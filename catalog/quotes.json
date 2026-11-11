@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "quotes": [
+    {
+      "id": "online-1-001",
+      "text": "Có chí thì nên.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-002",
+      "text": "Học ăn, học nói, học gói, học mở.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-003",
+      "text": "Gần mực thì đen, gần đèn thì rạng.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-004",
+      "text": "Nước chảy đá mòn.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-005",
+      "text": "Cái khó ló cái khôn.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-006",
+      "text": "Một con ngựa đau, cả tàu bỏ cỏ.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-007",
+      "text": "Thương người như thể thương thân.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-008",
+      "text": "Ăn vóc học hay.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-009",
+      "text": "Biết thì thưa thốt, không biết thì dựa cột mà nghe.",
+      "author": "Tục ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-010",
+      "text": "Người biết đủ thì giàu.",
+      "author": "Lão Tử",
+      "source": "Đạo Đức Kinh",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-011",
+      "text": "Người quân tử hòa mà không đồng, kẻ tiểu nhân đồng mà không hòa.",
+      "author": "Khổng Tử",
+      "source": "Luận ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-012",
+      "text": "Ôn cố nhi tri tân: ôn lại cái cũ để biết cái mới.",
+      "author": "Khổng Tử",
+      "source": "Luận ngữ",
+      "lang": "vi"
+    },
+    {
+      "id": "online-1-101",
+      "text": "He who knows others is wise; he who knows himself is enlightened.",
+      "author": "Lao Tzu",
+      "source": "Tao Te Ching",
+      "lang": "en"
+    },
+    {
+      "id": "online-1-102",
+      "text": "Learning without thought is labour lost; thought without learning is perilous.",
+      "author": "Confucius",
+      "source": "The Analects",
+      "lang": "en"
+    },
+    {
+      "id": "online-1-103",
+      "text": "No man ever steps in the same river twice.",
+      "author": "Heraclitus",
+      "lang": "en"
+    },
+    {
+      "id": "online-1-104",
+      "text": "The best time to plant a tree was twenty years ago. The second best time is now.",
+      "author": "Proverb",
+      "lang": "en"
+    },
+    {
+      "id": "online-1-105",
+      "text": "Early to bed and early to rise makes a man healthy, wealthy, and wise.",
+      "author": "Benjamin Franklin",
+      "source": "Poor Richard's Almanack",
+      "lang": "en"
+    },
+    {
+      "id": "online-1-106",
+      "text": "Hope is the thing with feathers that perches in the soul.",
+      "author": "Emily Dickinson",
+      "lang": "en"
+    },
+    {
+      "id": "online-1-107",
+      "text": "To thine own self be true.",
+      "author": "William Shakespeare",
+      "source": "Hamlet",
+      "lang": "en"
+    }
+  ]
+}
