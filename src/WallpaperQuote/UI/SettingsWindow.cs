@@ -26,6 +26,7 @@ namespace WallpaperQuote.UI
         private readonly CheckBox _subfolders = new CheckBox { Content = "Quét cả thư mục con", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
         private readonly StackPanel _folderList = new StackPanel();
         private readonly TextBlock _skipNote = Ui.Text("", 12, color: Ui.Muted);
+        private readonly CheckBox _allowSmall = new CheckBox { Content = "Dùng cả ảnh nhỏ (rộng dưới 800px – ảnh sẽ bị phóng to nên có thể hơi mờ)", Margin = new Thickness(0, 8, 0, 0) };
         private readonly TextBox _linkInput = new TextBox
         {
             AcceptsReturn = true,
@@ -152,7 +153,8 @@ namespace WallpaperQuote.UI
                 Ui.Card(
                     Ui.Row(Ui.Title("Thư mục trên máy"), _subfolders, Ui.Btn("+ Thêm thư mục", PickFolder)),
                     _folderList,
-                    _skipNote),
+                    _skipNote,
+                    _allowSmall),
                 Ui.Card(
                     Ui.Title("Ảnh qua đường link"),
                     Ui.Text("Dán link trực tiếp tới file ảnh (http/https), mỗi dòng một link. Link thư mục Google Drive không dùng được; hãy cài Google Drive cho máy tính rồi chọn thư mục Drive ở phần Thư mục trên máy.", 12, color: Ui.Muted),
@@ -214,7 +216,7 @@ namespace WallpaperQuote.UI
             }
 
             var notes = new List<string>();
-            if (scan != null && scan.TooSmall > 0) notes.Add($"Bỏ qua {scan.TooSmall} ảnh rộng dưới {s.MinImageWidth}px");
+            if (scan != null && scan.TooSmall > 0) notes.Add($"Bỏ qua {scan.TooSmall} ảnh rộng dưới {s.MinImageWidth}px (tick \"Dùng cả ảnh nhỏ\" bên dưới để dùng)");
             if (scan != null && scan.Heic > 0) notes.Add($"{scan.Heic} ảnh HEIC (iPhone) chưa đọc được: cài \"HEIF Image Extensions\" từ Microsoft Store rồi bấm Quét lại");
             if (scan != null && scan.Unreadable > 0) notes.Add($"{scan.Unreadable} ảnh lỗi");
             _skipNote.Text = notes.Count == 0 ? "" : string.Join(" · ", notes);
@@ -487,6 +489,7 @@ namespace WallpaperQuote.UI
 
         private void WireEvents()
         {
+            _allowSmall.Click += (_, __) => { if (!_updating) _ = _host.SetAllowSmallImagesAsync(_allowSmall.IsChecked == true); };
             _subfolders.Click += (_, __) => { if (!_updating) _ = _host.SetScanSubfoldersAsync(_subfolders.IsChecked == true); };
             _nasa.Click += (_, __) => { if (!_updating) _host.SetNasaEnabled(_nasa.IsChecked == true); };
             _wiki.Click += (_, __) => { if (!_updating) _host.SetWikimediaEnabled(_wiki.IsChecked == true); };
@@ -543,6 +546,7 @@ namespace WallpaperQuote.UI
 
                 // Ảnh
                 _subfolders.IsChecked = s.ScanSubfolders;
+                _allowSmall.IsChecked = s.MinImageWidth < 800;
                 RebuildFolders();
                 RebuildLinks();
                 _nasa.Content = $"NASA – Thư viện ảnh (thiên hà, tinh vân, Trái Đất…)  ·  {_host.OnlineImages.Count(OnlineSource.Nasa)} ảnh đã tải";

@@ -29,7 +29,7 @@ namespace WallpaperQuote
     /// </summary>
     public sealed class AppHost : IDisposable
     {
-        public const string Version = "0.4.0";
+        public const string Version = "0.4.1";
 
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
@@ -379,6 +379,15 @@ namespace WallpaperQuote
             _settings.Folders.RemoveAll(f => string.Equals(f, folder, StringComparison.OrdinalIgnoreCase));
             SettingsStore.Save(_settings);
             await RescanAsync();
+        }
+
+        /// <summary>Dùng cả ảnh rộng dưới 800px (ảnh sẽ bị phóng to, có thể mờ).</summary>
+        public async Task SetAllowSmallImagesAsync(bool allow)
+        {
+            _settings.MinImageWidth = allow ? 0 : 800;
+            SettingsStore.Save(_settings);
+            await RescanAsync();
+            if (allow && _settings.Folders.Count > 0) await ChangeAsync(Change.Image, auto: false);
         }
 
         public async Task SetScanSubfoldersAsync(bool value)
