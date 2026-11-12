@@ -9,6 +9,12 @@ App Windows tự đổi hình nền máy tính kèm một câu quote ngẫu nhi�
 3. Cửa sổ **Cài đặt** tự mở; app tạo lối tắt **"Hình nền & Quote"** ngoài desktop để mở lại Cài đặt bất cứ lúc nào.
 4. Icon xanh dưới khay hệ thống: nháy đúp = làm mới; chuột phải = menu.
 
+## Bản 0.4.2: click lên desktop để thả hiệu ứng
+
+1. Chuột phải icon xanh dưới khay → **Hiệu ứng** → chọn **Tuyết rơi** (hoặc Mưa / Hoa).
+2. Thu nhỏ cửa sổ (Windows + D), **click chuột trái 1 lần** lên vùng trống của desktop → tuyết rơi 10 giây.
+3. Đổi thời gian: Hiệu ứng → *Mỗi lần click rơi trong* → 10 giây / 30 giây / 1 phút. Muốn rơi suốt: chọn *Rơi liên tục*.
+
 ## Bản 0.4 có gì mới
 
 - **Ảnh NASA mới**: chuyển sang *NASA Image and Video Library* (thiên hà, tinh vân, Trái Đất nhìn từ không gian…). Không cần API key nữa. Nguồn ảnh thiên văn APOD cũ không còn trả ảnh.

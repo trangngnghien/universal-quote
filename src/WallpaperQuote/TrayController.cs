@@ -20,7 +20,9 @@ namespace WallpaperQuote
         private readonly Forms.ToolStripMenuItem _status;
         private readonly Forms.ToolStripMenuItem _pause;
         private readonly Forms.ToolStripMenuItem _effects;
-        private readonly (string Type, Forms.ToolStripMenuItem Item)[] _fxItems;
+        private readonly (string Kind, Forms.ToolStripMenuItem Item)[] _kindItems;
+        private readonly (string Mode, Forms.ToolStripMenuItem Item)[] _modeItems;
+        private readonly (int Seconds, Forms.ToolStripMenuItem Item)[] _secondItems;
         private Drawing.Icon? _runningIcon;
         private Drawing.Icon? _pausedIcon;
 
@@ -47,16 +49,32 @@ namespace WallpaperQuote
             _menu.Items.Add(Item("Thông tin ảnh hiện tại", ShowCurrentInfo));
             _menu.Items.Add(Item("Chỉnh vị trí quote…", () => _ = _host.EditQuotePositionAsync()));
             _effects = new Forms.ToolStripMenuItem("Hiệu ứng");
-            _effects.DropDownItems.Add(Item("Thả một đợt ngay (10 giây)", () => _host.BurstEffect()));
-            _effects.DropDownItems.Add(new Forms.ToolStripSeparator());
-            _fxItems = new[]
+            _kindItems = new[]
             {
-                (EffectType.None, Item("Tắt hiệu ứng liên tục", () => _host.SetEffect(EffectType.None))),
-                (EffectType.Snow, Item("Tuyết rơi", () => _host.SetEffect(EffectType.Snow))),
-                (EffectType.Rain, Item("Mưa rơi", () => _host.SetEffect(EffectType.Rain))),
-                (EffectType.Petals, Item("Hoa rơi", () => _host.SetEffect(EffectType.Petals)))
+                (EffectType.Snow, Item("❄ Tuyết rơi", () => _host.SetEffectKind(EffectType.Snow))),
+                (EffectType.Rain, Item("💧 Mưa rơi", () => _host.SetEffectKind(EffectType.Rain))),
+                (EffectType.Petals, Item("🌸 Hoa rơi", () => _host.SetEffectKind(EffectType.Petals)))
             };
-            foreach (var (_, item) in _fxItems) _effects.DropDownItems.Add(item);
+            foreach (var (_, item) in _kindItems) _effects.DropDownItems.Add(item);
+            _effects.DropDownItems.Add(new Forms.ToolStripSeparator());
+            _modeItems = new[]
+            {
+                (EffectMode.Click, Item("Click chuột trái lên desktop để thả", () => _host.SetEffectMode(EffectMode.Click))),
+                (EffectMode.Continuous, Item("Rơi liên tục", () => _host.SetEffectMode(EffectMode.Continuous))),
+                (EffectMode.Off, Item("Tắt hiệu ứng", () => _host.SetEffectMode(EffectMode.Off)))
+            };
+            foreach (var (_, item) in _modeItems) _effects.DropDownItems.Add(item);
+            _effects.DropDownItems.Add(new Forms.ToolStripSeparator());
+            var duration = new Forms.ToolStripMenuItem("Mỗi lần click rơi trong");
+            _secondItems = new[]
+            {
+                (10, Item("10 giây", () => _host.SetEffectBurstSeconds(10))),
+                (30, Item("30 giây", () => _host.SetEffectBurstSeconds(30))),
+                (60, Item("1 phút", () => _host.SetEffectBurstSeconds(60)))
+            };
+            foreach (var (_, item) in _secondItems) duration.DropDownItems.Add(item);
+            _effects.DropDownItems.Add(duration);
+            _effects.DropDownItems.Add(Item("Thả một đợt ngay", () => _host.BurstEffect()));
             _menu.Items.Add(_effects);
             _menu.Items.Add(Item("Cài đặt…", () => _host.OpenSettings()));
             _menu.Items.Add(new Forms.ToolStripSeparator());
@@ -103,7 +121,10 @@ namespace WallpaperQuote
             var tooltip = paused ? $"{AppTitle} · Tạm dừng" : $"{AppTitle} · Nháy đúp để làm mới";
             _icon.Text = tooltip.Length > 120 ? tooltip.Substring(0, 120) : tooltip;
             _icon.Icon = paused ? _pausedIcon : _runningIcon;
-            foreach (var (type, item) in _fxItems) item.Checked = _host.Settings.Effect == type;
+            var st = _host.Settings;
+            foreach (var (kind, item) in _kindItems) item.Checked = st.EffectKind == kind;
+            foreach (var (mode, item) in _modeItems) item.Checked = st.EffectMode == mode;
+            foreach (var (sec, item) in _secondItems) item.Checked = st.EffectBurstSeconds == sec;
         }
 
         private void ShowCurrentInfo()

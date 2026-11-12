@@ -72,10 +72,17 @@ namespace WallpaperQuote.UI
         private readonly TextBlock _positionText = Ui.Text("", 12, color: Ui.Muted);
 
         // Tab Hiệu ứng
-        private readonly RadioButton _fxNone = new RadioButton { Content = "Tắt", GroupName = "fx", Margin = new Thickness(0, 0, 24, 0) };
-        private readonly RadioButton _fxSnow = new RadioButton { Content = "Tuyết rơi", GroupName = "fx", Margin = new Thickness(0, 0, 24, 0) };
-        private readonly RadioButton _fxRain = new RadioButton { Content = "Mưa rơi", GroupName = "fx", Margin = new Thickness(0, 0, 24, 0) };
-        private readonly RadioButton _fxPetals = new RadioButton { Content = "Hoa rơi", GroupName = "fx" };
+        private static RadioButton Radio(string text, string group, double right = 24) =>
+            new RadioButton { Content = text, GroupName = group, Margin = new Thickness(0, 0, right, 6) };
+        private readonly RadioButton _fxSnow = Radio("❄ Tuyết", "fxk");
+        private readonly RadioButton _fxRain = Radio("💧 Mưa", "fxk");
+        private readonly RadioButton _fxPetals = Radio("🌸 Hoa", "fxk", 0);
+        private readonly RadioButton _fxOff = Radio("Tắt", "fxm");
+        private readonly RadioButton _fxClick = Radio("Click chuột trái lên desktop → hạt rơi một lúc", "fxm");
+        private readonly RadioButton _fxContinuous = Radio("Rơi liên tục", "fxm");
+        private readonly RadioButton _fx10 = Radio("10 giây", "fxs");
+        private readonly RadioButton _fx30 = Radio("30 giây", "fxs");
+        private readonly RadioButton _fx60 = Radio("1 phút", "fxs", 0);
         private readonly RadioButton _fxLight = new RadioButton { Content = "Nhẹ", GroupName = "fxi", Margin = new Thickness(0, 0, 24, 0) };
         private readonly RadioButton _fxMedium = new RadioButton { Content = "Vừa", GroupName = "fxi", Margin = new Thickness(0, 0, 24, 0) };
         private readonly RadioButton _fxHeavy = new RadioButton { Content = "Dày", GroupName = "fxi" };
@@ -400,28 +407,31 @@ namespace WallpaperQuote.UI
         private UIElement BuildEffectsTab()
         {
             return Ui.Stack(
-                Header("Hiệu ứng động", "Hạt rơi chuyển động trên hình nền, nằm phía sau các biểu tượng desktop."),
+                Header("Hiệu ứng động", "Tuyết, mưa hoặc hoa rơi trên hình nền, phía sau các biểu tượng desktop."),
                 Ui.Card(
-                    Ui.Title("Hiệu ứng rơi liên tục"),
+                    Ui.Title("1. Chọn hiệu ứng"),
                     Ui.Spacer(8),
-                    Ui.Horizontal(_fxNone, _fxSnow, _fxRain, _fxPetals),
-                    Ui.Divider(),
-                    Ui.Text("Mật độ", 13, bold: true),
+                    Ui.Horizontal(_fxSnow, _fxRain, _fxPetals)),
+                Ui.Card(
+                    Ui.Title("2. Khi nào hạt rơi"),
+                    Ui.Spacer(8),
+                    _fxOff,
+                    _fxClick,
+                    Ui.Horizontal(Ui.Text("      Mỗi lần click rơi trong:", 13), Ui.Spacer(8), _fx10, _fx30, _fx60),
+                    _fxContinuous,
+                    Ui.Horizontal(Ui.Text("      Mật độ:", 13), Ui.Spacer(8), _fxLight, _fxMedium, _fxHeavy),
                     Ui.Spacer(4),
-                    Ui.Horizontal(_fxLight, _fxMedium, _fxHeavy),
-                    Ui.Spacer(10),
                     _fxBattery,
                     Ui.Spacer(6),
                     _fxStatus),
                 Ui.Card(
-                    Ui.Title("Thả một đợt ngay"),
-                    Ui.Text("Hạt rơi dày trong 10 giây rồi tự dừng, dùng được cả khi hiệu ứng liên tục đang tắt. Cũng bấm được từ icon dưới khay → Hiệu ứng.", 12, color: Ui.Muted),
+                    Ui.Title("Thử ngay"),
+                    Ui.Text("Bấm để xem hạt rơi trên desktop (thu nhỏ cửa sổ này để nhìn rõ).", 12, color: Ui.Muted),
                     Ui.Spacer(8),
                     Ui.Horizontal(
                         Ui.Btn("Thả tuyết", () => BurstWith(EffectType.Snow)),
                         Ui.Btn("Thả mưa", () => BurstWith(EffectType.Rain)),
-                        Ui.Btn("Thả hoa", () => BurstWith(EffectType.Petals)))),
-                Ui.Text("Hiệu ứng dùng khoảng 1–3% CPU. Nếu thấy máy chậm, chọn mật độ Nhẹ hoặc tắt hiệu ứng.", 12, color: Ui.Muted)
+                        Ui.Btn("Thả hoa", () => BurstWith(EffectType.Petals))))
             );
         }
 
@@ -521,10 +531,15 @@ namespace WallpaperQuote.UI
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                 RefreshAll();
             };
-            _fxNone.Checked += (_, __) => { if (!_updating) _host.SetEffect(EffectType.None); };
-            _fxSnow.Checked += (_, __) => { if (!_updating) _host.SetEffect(EffectType.Snow); };
-            _fxRain.Checked += (_, __) => { if (!_updating) _host.SetEffect(EffectType.Rain); };
-            _fxPetals.Checked += (_, __) => { if (!_updating) _host.SetEffect(EffectType.Petals); };
+            _fxSnow.Checked += (_, __) => { if (!_updating) _host.SetEffectKind(EffectType.Snow); };
+            _fxRain.Checked += (_, __) => { if (!_updating) _host.SetEffectKind(EffectType.Rain); };
+            _fxPetals.Checked += (_, __) => { if (!_updating) _host.SetEffectKind(EffectType.Petals); };
+            _fxOff.Checked += (_, __) => { if (!_updating) _host.SetEffectMode(EffectMode.Off); };
+            _fxClick.Checked += (_, __) => { if (!_updating) _host.SetEffectMode(EffectMode.Click); };
+            _fxContinuous.Checked += (_, __) => { if (!_updating) _host.SetEffectMode(EffectMode.Continuous); };
+            _fx10.Checked += (_, __) => { if (!_updating) _host.SetEffectBurstSeconds(10); };
+            _fx30.Checked += (_, __) => { if (!_updating) _host.SetEffectBurstSeconds(30); };
+            _fx60.Checked += (_, __) => { if (!_updating) _host.SetEffectBurstSeconds(60); };
             _fxLight.Checked += (_, __) => { if (!_updating) _host.SetEffectIntensity(EffectIntensity.Light); };
             _fxMedium.Checked += (_, __) => { if (!_updating) _host.SetEffectIntensity(EffectIntensity.Medium); };
             _fxHeavy.Checked += (_, __) => { if (!_updating) _host.SetEffectIntensity(EffectIntensity.Heavy); };
@@ -580,17 +595,24 @@ namespace WallpaperQuote.UI
                 _pauseButton.Content = _host.IsPaused ? "Tiếp tục" : "Tạm dừng";
 
                 // Hiệu ứng
-                _fxNone.IsChecked = s.Effect == EffectType.None;
-                _fxSnow.IsChecked = s.Effect == EffectType.Snow;
-                _fxRain.IsChecked = s.Effect == EffectType.Rain;
-                _fxPetals.IsChecked = s.Effect == EffectType.Petals;
+                _fxSnow.IsChecked = s.EffectKind == EffectType.Snow;
+                _fxRain.IsChecked = s.EffectKind == EffectType.Rain;
+                _fxPetals.IsChecked = s.EffectKind == EffectType.Petals;
+                _fxOff.IsChecked = s.EffectMode == EffectMode.Off;
+                _fxClick.IsChecked = s.EffectMode == EffectMode.Click;
+                _fxContinuous.IsChecked = s.EffectMode == EffectMode.Continuous;
+                _fx10.IsChecked = s.EffectBurstSeconds == 10;
+                _fx30.IsChecked = s.EffectBurstSeconds == 30;
+                _fx60.IsChecked = s.EffectBurstSeconds == 60;
                 _fxLight.IsChecked = s.EffectIntensity == EffectIntensity.Light;
                 _fxMedium.IsChecked = s.EffectIntensity == EffectIntensity.Medium;
                 _fxHeavy.IsChecked = s.EffectIntensity == EffectIntensity.Heavy;
                 _fxBattery.IsChecked = s.EffectPauseOnBattery;
-                _fxStatus.Text = s.Effect == EffectType.None ? "Hiệu ứng liên tục đang tắt."
-                    : _host.EffectsPausedForBattery ? "Đang tạm dừng vì máy chạy bằng pin. Cắm sạc để hiệu ứng chạy lại."
-                    : "Đang chạy.";
+                var kindName = AppHost.KindName(s.EffectKind);
+                _fxStatus.Text = s.EffectMode == EffectMode.Off ? "Hiệu ứng đang tắt."
+                    : s.EffectMode == EffectMode.Click ? $"Đang bật: click chuột trái 1 lần lên vùng trống của desktop → {kindName} rơi {s.EffectBurstSeconds} giây."
+                    : _host.EffectsPausedForBattery ? "Đang tạm dừng vì máy chạy bằng pin. Cắm sạc hoặc bỏ tick ô trên để chạy lại."
+                    : $"Đang chạy: {kindName} rơi liên tục.";
 
                 // Chung
                 _startup.IsChecked = StartupRegistration.IsEnabled();

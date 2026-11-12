@@ -29,7 +29,7 @@ namespace WallpaperQuote
     /// </summary>
     public sealed class AppHost : IDisposable
     {
-        public const string Version = "0.4.1";
+        public const string Version = "0.4.2";
 
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
@@ -62,6 +62,7 @@ namespace WallpaperQuote
         private bool _disposed;
         private bool _editingPosition;
         private EffectsWindow? _effects;
+        private DesktopClickHook? _clickHook;
         private bool _effectsFailedNotified;
         private string? _currentWallpaperFile;
 
@@ -914,11 +915,36 @@ namespace WallpaperQuote
         public bool EffectsPausedForBattery =>
             _settings.EffectPauseOnBattery && Forms.SystemInformation.PowerStatus.PowerLineStatus == Forms.PowerLineStatus.Offline;
 
-        public void SetEffect(string effect)
+        public void SetEffectKind(string kind)
         {
-            _settings.Effect = effect;
+            _settings.EffectKind = kind;
+            Log.Info($"Hiệu ứng: chọn loại {kind}");
+            if (_settings.EffectMode == EffectMode.Off)
+            {
+                // Chọn hiệu ứng khi đang tắt = bật chế độ click lên desktop (cách dùng chính).
+                SetEffectMode(EffectMode.Click);
+                return;
+            }
             SettingsStore.Save(_settings);
             ApplyEffects();
+            NotifyChanged();
+        }
+
+        public void SetEffectMode(string mode)
+        {
+            _settings.EffectMode = mode;
+            SettingsStore.Save(_settings);
+            Log.Info($"Hiệu ứng: chế độ {mode}");
+            ApplyEffects();
+            NotifyChanged();
+            if (mode == EffectMode.Click)
+                _tray?.Notify("Đã bật hiệu ứng khi click", $"Click chuột trái 1 lần lên vùng trống của desktop: {KindName(_settings.EffectKind)} rơi {_settings.EffectBurstSeconds} giây.");
+        }
+
+        public void SetEffectBurstSeconds(int seconds)
+        {
+            _settings.EffectBurstSeconds = seconds;
+            SettingsStore.Save(_settings);
             NotifyChanged();
         }
 
@@ -938,23 +964,53 @@ namespace WallpaperQuote
             NotifyChanged();
         }
 
-        /// <summary>Thả một đợt hạt rơi dày trong 10 giây (cách B), kể cả khi hiệu ứng liên tục đang tắt.</summary>
+        public static string KindName(string kind) =>
+            kind == EffectType.Rain ? "mưa" : kind == EffectType.Petals ? "hoa" : "tuyết";
+
+        /// <summary>Thả một đợt hạt rơi dày (W7.2), kể cả khi hiệu ứng liên tục đang tắt.</summary>
         public void BurstEffect(string? kind = null)
         {
-            var type = kind ?? (_settings.Effect == EffectType.None ? EffectType.Snow : _settings.Effect);
+            var type = kind ?? _settings.EffectKind;
+            Log.Info($"Hiệu ứng: thả một đợt {type} {_settings.EffectBurstSeconds} giây");
             if (!EnsureEffectsWindow()) return;
-            _effects!.Particles.Burst(type, TimeSpan.FromSeconds(10));
+            _effects!.Particles.Burst(type, TimeSpan.FromSeconds(_settings.EffectBurstSeconds));
         }
 
-        /// <summary>Bật/tắt lớp hiệu ứng liên tục theo cài đặt (cách A).</summary>
+        private DateTime _lastClickBurst = DateTime.MinValue;
+
+        private void OnDesktopClick(int x, int y)
+        {
+            // Hook chạy trên luồng giao diện; đẩy việc ra sau để chuột không bị trễ.
+            _dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_disposed || _settings.EffectMode != EffectMode.Click) return;
+                if ((DateTime.Now - _lastClickBurst).TotalMilliseconds < 400) return;   // nháy đúp chỉ tính 1 lần
+                _lastClickBurst = DateTime.Now;
+                BurstEffect();
+            }));
+        }
+
+        /// <summary>Bật/tắt lớp hiệu ứng liên tục (W7.1) và bắt click desktop (W7.3) theo cài đặt.</summary>
         private void ApplyEffects()
         {
             if (_disposed) return;
-            var wantContinuous = _settings.Effect != EffectType.None && !EffectsPausedForBattery;
+
+            if (_settings.EffectMode == EffectMode.Click)
+            {
+                _clickHook ??= new DesktopClickHook(OnDesktopClick);
+                if (!_clickHook.Install())
+                    _tray?.Notify("Không bật được click desktop", "Windows không cho app bắt click chuột. Dùng chuột phải icon → Hiệu ứng → Thả một đợt ngay.", warning: true);
+            }
+            else
+            {
+                _clickHook?.Uninstall();
+            }
+
+            var wantContinuous = _settings.EffectMode == EffectMode.Continuous && !EffectsPausedForBattery;
             if (wantContinuous)
             {
                 if (!EnsureEffectsWindow()) return;
-                _effects!.Particles.Configure(_settings.Effect, _settings.EffectIntensity);
+                _effects!.Particles.Configure(_settings.EffectKind, _settings.EffectIntensity);
             }
             else if (_effects != null)
             {
@@ -983,9 +1039,10 @@ namespace WallpaperQuote
                 }
                 window.Particles.Idle += () => _dispatcher.InvokeAsync(() =>
                 {
-                    if (_settings.Effect == EffectType.None || EffectsPausedForBattery) CloseEffectsWindow(restoreWallpaper: true);
+                    if (_settings.EffectMode != EffectMode.Continuous || EffectsPausedForBattery) CloseEffectsWindow(restoreWallpaper: true);
                 });
                 _effects = window;
+                Log.Info($"Đã gắn lớp hiệu ứng vào desktop (Windows {Environment.OSVersion.Version})");
                 return true;
             }
             catch (Exception ex)
@@ -1116,6 +1173,8 @@ namespace WallpaperQuote
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             foreach (var w in _watchers) w.Dispose();
             _watchers.Clear();
+            _clickHook?.Dispose();
+            _clickHook = null;
             CloseEffectsWindow(restoreWallpaper: true);
             _tray?.Dispose();
             _tray = null;

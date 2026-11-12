@@ -69,6 +69,14 @@ namespace WallpaperQuote.Core
         public const string Petals = "petals";
     }
 
+    /// <summary>Cách hiệu ứng chạy (W7).</summary>
+    public static class EffectMode
+    {
+        public const string Off = "off";               // Tắt
+        public const string Click = "click";           // Click chuột trái lên desktop → rơi N giây
+        public const string Continuous = "continuous"; // Rơi liên tục
+    }
+
     public static class EffectIntensity
     {
         public const string Light = "light";
@@ -152,7 +160,11 @@ namespace WallpaperQuote.Core
         public double? QuotePosY { get; set; }
 
         // Hiệu ứng động (W7)
+        /// <summary>Bản 0.4.0: loại hiệu ứng liên tục. Từ 0.4.2 chỉ đọc để chuyển sang EffectKind + EffectMode.</summary>
         public string Effect { get; set; } = EffectType.None;
+        public string EffectKind { get; set; } = EffectType.Snow;
+        public string EffectMode { get; set; } = Core.EffectMode.Off;
+        public int EffectBurstSeconds { get; set; } = 10;
         public string EffectIntensity { get; set; } = Core.EffectIntensity.Medium;
         public bool EffectPauseOnBattery { get; set; } = true;
         public string? OriginalWallpaper { get; set; }
@@ -162,6 +174,7 @@ namespace WallpaperQuote.Core
         public bool DesktopIconsChecked { get; set; }
 
         public static readonly int[] AllowedIntervals = { 5, 15, 30, 60, 180, 360, 720, 1440 };
+        public static readonly int[] AllowedBurstSeconds = { 10, 30, 60 };
 
         public void Normalize()
         {
@@ -174,7 +187,15 @@ namespace WallpaperQuote.Core
             if (FitMode != Core.FitMode.Fit && FitMode != Core.FitMode.Stretch) FitMode = Core.FitMode.Fill;
             if (string.IsNullOrWhiteSpace(NasaApiKey)) NasaApiKey = "DEMO_KEY";
             if (CacheLimitMb < 50) CacheLimitMb = 500;
-            if (Effect != EffectType.Snow && Effect != EffectType.Rain && Effect != EffectType.Petals) Effect = EffectType.None;
+            if (Effect == EffectType.Snow || Effect == EffectType.Rain || Effect == EffectType.Petals)
+            {
+                EffectKind = Effect;
+                EffectMode = Core.EffectMode.Continuous;
+            }
+            Effect = EffectType.None;
+            if (EffectKind != EffectType.Rain && EffectKind != EffectType.Petals) EffectKind = EffectType.Snow;
+            if (EffectMode != Core.EffectMode.Click && EffectMode != Core.EffectMode.Continuous) EffectMode = Core.EffectMode.Off;
+            if (Array.IndexOf(AllowedBurstSeconds, EffectBurstSeconds) < 0) EffectBurstSeconds = 10;
             if (EffectIntensity != Core.EffectIntensity.Light && EffectIntensity != Core.EffectIntensity.Heavy) EffectIntensity = Core.EffectIntensity.Medium;
             if (QuotePosX.HasValue && (QuotePosX < 0 || QuotePosX > 1)) QuotePosX = null;
             if (QuotePosY.HasValue && (QuotePosY < 0 || QuotePosY > 1)) QuotePosY = null;
