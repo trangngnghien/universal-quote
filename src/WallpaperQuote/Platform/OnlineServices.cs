@@ -71,60 +71,89 @@ namespace WallpaperQuote.Platform
             catch { return true; }
         }
 
-        // ------------------------------------------------------------ NASA APOD
+        // ------------------------------------------------------------ NASA Image and Video Library
+
+        /// <summary>Chủ đề ảnh NASA hợp làm hình nền.</summary>
+        private static readonly string[] NasaTopics =
+        {
+            "galaxy", "nebula", "aurora", "earth from space", "milky way", "hubble deep field",
+            "saturn", "jupiter", "star cluster", "sunrise from space", "international space station earth"
+        };
 
         /// <summary>
-        /// Lấy ảnh NASA APOD trong <paramref name="days"/> ngày gần nhất (1 lần gọi, theo khoảng ngày).
-        /// Chỉ nhận ảnh (không video) có trường copyright trống (BR W5.1). Ảnh mới nhất trước.
+        /// Lấy ảnh từ NASA Image and Video Library (images.nasa.gov) — không cần API key.
+        /// Thay cho API "Ảnh thiên văn trong ngày" (APOD): từ 30/9/2026 APOD chuyển trang và API trả về logo thay vì ảnh.
+        /// Loại ảnh có ghi chú bản quyền trong mô tả (BR W5.1).
         /// </summary>
-        public static async Task<FetchResult> FetchNasaAsync(string apiKey, int days, ISet<string> skipIds, CancellationToken ct)
+        public static async Task<FetchResult> FetchNasaLibraryAsync(int want, ISet<string> skipIds, CancellationToken ct)
         {
-            // Giờ Mỹ (APOD ra ảnh theo giờ miền Đông Mỹ) → lùi 1 ngày để không hỏi ngày chưa có ảnh.
-            var end = DateTime.UtcNow.AddHours(-5).Date.AddDays(-1);
-            var start = end.AddDays(-(days - 1));
-            var url = $"https://api.nasa.gov/planetary/apod?api_key={Uri.EscapeDataString(apiKey)}" +
-                      $"&start_date={start:yyyy-MM-dd}&end_date={end:yyyy-MM-dd}&thumbs=false";
-            using var response = await Slow.GetAsync(url, ct);
-            if ((int)response.StatusCode == 429) throw new RateLimitException();
-            if ((int)response.StatusCode == 403 || (int)response.StatusCode == 401)
-                throw new DownloadException("API key NASA không hợp lệ");
-            response.EnsureSuccessStatusCode();
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-
+            var random = new Random();
             var result = new FetchResult();
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return result;
-            var items = new List<JsonElement>();
-            foreach (var item in doc.RootElement.EnumerateArray()) items.Add(item);
-            items.Reverse();   // mới nhất trước
-            foreach (var item in items)
+            var topics = new List<string>(NasaTopics);
+            for (var i = topics.Count - 1; i > 0; i--)
             {
-                if (skipIds.Contains("nasa-" + (Str(item, "date") ?? ""))) continue;
-                var media = Str(item, "media_type");
-                if (media != "image") { result.RejectedMedia++; continue; }
-                var copyright = Str(item, "copyright");
-                if (!string.IsNullOrWhiteSpace(copyright)) { result.RejectedLicense++; continue; }
-                var hd = Str(item, "hdurl");
-                var normal = Str(item, "url");
-                var image = hd ?? normal;
-                var date = Str(item, "date");
-                if (string.IsNullOrWhiteSpace(image) || string.IsNullOrWhiteSpace(date)) { result.RejectedMedia++; continue; }
+                var j = random.Next(i + 1);
+                (topics[i], topics[j]) = (topics[j], topics[i]);
+            }
 
-                string? page = null;
-                if (DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
-                    page = $"https://apod.nasa.gov/apod/ap{d:yyMMdd}.html";
-
-                result.Accepted.Add(new OnlineCandidate
+            foreach (var topic in topics.GetRange(0, Math.Min(4, topics.Count)))
+            {
+                if (result.Accepted.Count >= want * 2) break;
+                var page = random.Next(1, 6);
+                var url = $"https://images-api.nasa.gov/search?q={Uri.EscapeDataString(topic)}&media_type=image&page={page}";
+                HttpResponseMessage response;
+                try { response = await Slow.GetAsync(url, ct); }
+                catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException) { continue; }
+                using (response)
                 {
-                    Id = "nasa-" + date,
-                    Source = OnlineSource.Nasa,
-                    ImageUrl = image!,
-                    FallbackUrl = hd != null && normal != null && normal != hd ? normal : null,
-                    Title = Str(item, "title") ?? "Ảnh thiên văn NASA",
-                    Author = "NASA",
-                    License = "Public Domain",
-                    PageUrl = page,
-                    Date = date
-                });
+                    if ((int)response.StatusCode == 429) throw new RateLimitException();
+                    if (!response.IsSuccessStatusCode) continue;
+                    using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                    if (!doc.RootElement.TryGetProperty("collection", out var collection)) continue;
+                    if (!collection.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array) continue;
+
+                    foreach (var item in items.EnumerateArray())
+                    {
+                        if (!item.TryGetProperty("data", out var dataArr) || dataArr.ValueKind != JsonValueKind.Array || dataArr.GetArrayLength() == 0) continue;
+                        var data = dataArr[0];
+                        if (Str(data, "media_type") != "image") { result.RejectedMedia++; continue; }
+                        var nasaId = Str(data, "nasa_id");
+                        if (string.IsNullOrWhiteSpace(nasaId)) continue;
+                        var id = "nasalib-" + nasaId;
+                        if (skipIds.Contains(id) || result.Accepted.Exists(c => c.Id == id)) continue;
+
+                        var description = (Str(data, "description") ?? "") + " " + (Str(data, "photographer") ?? "") + " " + (Str(data, "secondary_creator") ?? "");
+                        if (description.IndexOf("©", StringComparison.Ordinal) >= 0
+                            || description.IndexOf("copyright", StringComparison.OrdinalIgnoreCase) >= 0
+                            || description.IndexOf("all rights reserved", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            result.RejectedLicense++;
+                            continue;
+                        }
+
+                        var escaped = Uri.EscapeDataString(nasaId!);
+                        var date = Str(data, "date_created");
+                        result.Accepted.Add(new OnlineCandidate
+                        {
+                            Id = id,
+                            Source = OnlineSource.Nasa,
+                            ImageUrl = $"https://images-assets.nasa.gov/image/{escaped}/{escaped}~orig.jpg",
+                            FallbackUrl = $"https://images-assets.nasa.gov/image/{escaped}/{escaped}~large.jpg",
+                            Title = Str(data, "title") ?? "Ảnh NASA",
+                            Author = Str(data, "photographer") ?? Str(data, "secondary_creator") ?? ("NASA" + (Str(data, "center") is string centerName ? " " + centerName : "")),
+                            License = "NASA – không bản quyền theo chính sách sử dụng ảnh của NASA",
+                            PageUrl = $"https://images.nasa.gov/details/{escaped}",
+                            Date = date != null && date.Length >= 10 ? date.Substring(0, 10) : date
+                        });
+                    }
+                }
+            }
+
+            // Xáo trộn để mỗi ngày có ảnh khác chủ đề.
+            for (var i = result.Accepted.Count - 1; i > 0; i--)
+            {
+                var j = random.Next(i + 1);
+                (result.Accepted[i], result.Accepted[j]) = (result.Accepted[j], result.Accepted[i]);
             }
             return result;
         }

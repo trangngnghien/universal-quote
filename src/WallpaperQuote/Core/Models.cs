@@ -61,6 +61,21 @@ namespace WallpaperQuote.Core
         public const string Stretch = "stretch";
     }
 
+    public static class EffectType
+    {
+        public const string None = "none";
+        public const string Snow = "snow";
+        public const string Rain = "rain";
+        public const string Petals = "petals";
+    }
+
+    public static class EffectIntensity
+    {
+        public const string Light = "light";
+        public const string Medium = "medium";
+        public const string Heavy = "heavy";
+    }
+
     public static class LinkStatus
     {
         public const string Pending = "pending";   // Chờ tải (offline / đang tải)
@@ -135,6 +150,11 @@ namespace WallpaperQuote.Core
         /// <summary>Tâm khung quote theo tỉ lệ màn hình (0–1). Null = mặc định góc dưới phải.</summary>
         public double? QuotePosX { get; set; }
         public double? QuotePosY { get; set; }
+
+        // Hiệu ứng động (W7)
+        public string Effect { get; set; } = EffectType.None;
+        public string EffectIntensity { get; set; } = Core.EffectIntensity.Medium;
+        public bool EffectPauseOnBattery { get; set; } = true;
         public string? OriginalWallpaper { get; set; }
         public bool OriginalWallpaperSaved { get; set; }
         public bool WelcomeShown { get; set; }
@@ -154,6 +174,8 @@ namespace WallpaperQuote.Core
             if (FitMode != Core.FitMode.Fit && FitMode != Core.FitMode.Stretch) FitMode = Core.FitMode.Fill;
             if (string.IsNullOrWhiteSpace(NasaApiKey)) NasaApiKey = "DEMO_KEY";
             if (CacheLimitMb < 50) CacheLimitMb = 500;
+            if (Effect != EffectType.Snow && Effect != EffectType.Rain && Effect != EffectType.Petals) Effect = EffectType.None;
+            if (EffectIntensity != Core.EffectIntensity.Light && EffectIntensity != Core.EffectIntensity.Heavy) EffectIntensity = Core.EffectIntensity.Medium;
             if (QuotePosX.HasValue && (QuotePosX < 0 || QuotePosX > 1)) QuotePosX = null;
             if (QuotePosY.HasValue && (QuotePosY < 0 || QuotePosY > 1)) QuotePosY = null;
             if (!QuotePosX.HasValue || !QuotePosY.HasValue) { QuotePosX = null; QuotePosY = null; }

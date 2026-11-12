@@ -9,11 +9,18 @@ App Windows tự đổi hình nền máy tính kèm một câu quote ngẫu nhi�
 3. Cửa sổ **Cài đặt** tự mở; app tạo lối tắt **"Hình nền & Quote"** ngoài desktop để mở lại Cài đặt bất cứ lúc nào.
 4. Icon xanh dưới khay hệ thống: nháy đúp = làm mới; chuột phải = menu.
 
+## Bản 0.4 có gì mới
+
+- **Ảnh NASA mới**: chuyển sang *NASA Image and Video Library* (thiên hà, tinh vân, Trái Đất nhìn từ không gian…). Không cần API key nữa. Nguồn ảnh thiên văn APOD cũ không còn trả ảnh.
+- **Hiệu ứng rơi** (Cài đặt → tab *Hiệu ứng*): tuyết, mưa, hoa rơi chạy liên tục trên hình nền, phía sau các icon desktop. Chọn được mật độ Nhẹ / Vừa / Dày, và có thể tự tạm dừng khi máy chạy pin.
+- **Thả một đợt**: chuột phải icon dưới khay → *Hiệu ứng* → *Thả một đợt ngay*, hoặc dùng các nút trong tab *Hiệu ứng*. Hạt rơi dày trong 10 giây.
+- Kéo thả vị trí quote (từ 0.3): chuột phải icon dưới khay → *Chỉnh vị trí quote…*
+
 ## Bản 0.2 có gì mới
 
 - **Cửa sổ Cài đặt 4 tab**: Ảnh / Quote / Lịch xoay / Chung.
 - **Ảnh qua đường link**: dán 1 hoặc nhiều link ảnh trực tiếp (http/https), có trạng thái Sẵn sàng / Lỗi / Chờ tải, Thử lại, Xóa.
-- **Ảnh online public**: NASA (ảnh thiên văn) và Wikimedia Commons (ảnh trong ngày), chỉ nhận ảnh Public Domain / CC0, đồng bộ 1 lần/ngày, tối đa 10 ảnh mỗi nguồn. Có ô nhập NASA API key riêng.
+- **Ảnh online public**: NASA (ảnh thiên văn) và Wikimedia Commons (ảnh trong ngày), chỉ nhận ảnh Public Domain / CC0, đồng bộ 1 lần/ngày, tối đa 10 ảnh mỗi nguồn.
 - **Quote cá nhân**: thêm / sửa / xóa, có tác giả, nguồn trích dẫn, ngôn ngữ; chống trùng; lọc theo nhóm và tìm kiếm.
 - **Nhập nhiều quote** (bản 0.2.1): tab Quote → *Nhập nhiều quote* → dán nhiều dòng hoặc chọn file .txt/.csv.
   Mỗi dòng: `Nội dung | Tác giả | Nguồn | vi hoặc en` (chỉ nội dung là bắt buộc). Dán thẳng từ Excel/Google Sheets cũng được.

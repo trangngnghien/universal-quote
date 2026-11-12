@@ -29,7 +29,7 @@ namespace WallpaperQuote
     /// </summary>
     public sealed class AppHost : IDisposable
     {
-        public const string Version = "0.3.0";
+        public const string Version = "0.4.0";
 
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
@@ -61,6 +61,9 @@ namespace WallpaperQuote
         private bool _noImageNotified;
         private bool _disposed;
         private bool _editingPosition;
+        private EffectsWindow? _effects;
+        private bool _effectsFailedNotified;
+        private string? _currentWallpaperFile;
 
         /// <summary>Báo cho cửa sổ Cài đặt và tray cập nhật lại hiển thị.</summary>
         public event Action? StateChanged;
@@ -148,6 +151,7 @@ namespace WallpaperQuote
             else
                 RestartTimers();
 
+            ApplyEffects();
             await BackgroundWorkAsync();
         }
 
@@ -266,6 +270,8 @@ namespace WallpaperQuote
             }
 
             _slot ^= 1;
+            _currentWallpaperFile = output;
+            if (_effects != null) _effects.SetBackground(output);
             _currentImage = image;
             _currentQuote = quote;
             if (changeImage) _lastImageChange = DateTime.Now;
@@ -547,6 +553,7 @@ namespace WallpaperQuote
         private async Task BackgroundWorkAsync()
         {
             if (_disposed) return;
+            ApplyEffects();
             if (_settings.Links.Any(l => l.Status == LinkStatus.Pending) && Net.IsOnline())
             {
                 foreach (var link in _settings.Links.Where(l => l.Status == LinkStatus.Pending).ToList())
@@ -594,18 +601,18 @@ namespace WallpaperQuote
                     try
                     {
                         var skip = new HashSet<string>(_online.Items.Select(i => i.Id));
-                        var fetched = await Net.FetchNasaAsync(_settings.NasaApiKey, 60, skip, CancellationToken.None);
+                        var fetched = await Net.FetchNasaLibraryAsync(perSource, skip, CancellationToken.None);
                         var added = await DownloadCandidatesAsync(fetched.Accepted, perSource);
                         var notes = new List<string>();
                         if (fetched.RejectedLicense > 0) notes.Add($"loại {fetched.RejectedLicense} ảnh có bản quyền");
-                        if (fetched.RejectedMedia > 0) notes.Add($"{fetched.RejectedMedia} video");
+                        
                         parts.Add($"NASA +{added} ảnh" + (notes.Count > 0 ? $" ({string.Join(", ", notes)})" : ""));
-                        Log.Info($"NASA: {fetched.Accepted.Count} ảnh public domain mới, tải được {added}, {fetched.RejectedLicense} có bản quyền, {fetched.RejectedMedia} video");
+                        Log.Info($"NASA Image Library: {fetched.Accepted.Count} ảnh mới, tải được {added}, {fetched.RejectedLicense} có ghi chú bản quyền");
                         anyOk = true;
                     }
                     catch (RateLimitException)
                     {
-                        parts.Add("NASA: vượt hạn mức, thử lại ngày mai (nên dùng API key riêng)");
+                        parts.Add("NASA: vượt hạn mức, thử lại sau");
                         anyOk = true;
                     }
                     catch (DownloadException ex)
@@ -893,6 +900,112 @@ namespace WallpaperQuote
             await ChangeAsync(Change.Rerender, auto: false);
         }
 
+        // ================================================================== Hiệu ứng động (W7)
+
+        public bool EffectsPausedForBattery =>
+            _settings.EffectPauseOnBattery && Forms.SystemInformation.PowerStatus.PowerLineStatus == Forms.PowerLineStatus.Offline;
+
+        public void SetEffect(string effect)
+        {
+            _settings.Effect = effect;
+            SettingsStore.Save(_settings);
+            ApplyEffects();
+            NotifyChanged();
+        }
+
+        public void SetEffectIntensity(string intensity)
+        {
+            _settings.EffectIntensity = intensity;
+            SettingsStore.Save(_settings);
+            ApplyEffects();
+            NotifyChanged();
+        }
+
+        public void SetEffectPauseOnBattery(bool value)
+        {
+            _settings.EffectPauseOnBattery = value;
+            SettingsStore.Save(_settings);
+            ApplyEffects();
+            NotifyChanged();
+        }
+
+        /// <summary>Thả một đợt hạt rơi dày trong 10 giây (cách B), kể cả khi hiệu ứng liên tục đang tắt.</summary>
+        public void BurstEffect(string? kind = null)
+        {
+            var type = kind ?? (_settings.Effect == EffectType.None ? EffectType.Snow : _settings.Effect);
+            if (!EnsureEffectsWindow()) return;
+            _effects!.Particles.Burst(type, TimeSpan.FromSeconds(10));
+        }
+
+        /// <summary>Bật/tắt lớp hiệu ứng liên tục theo cài đặt (cách A).</summary>
+        private void ApplyEffects()
+        {
+            if (_disposed) return;
+            var wantContinuous = _settings.Effect != EffectType.None && !EffectsPausedForBattery;
+            if (wantContinuous)
+            {
+                if (!EnsureEffectsWindow()) return;
+                _effects!.Particles.Configure(_settings.Effect, _settings.EffectIntensity);
+            }
+            else if (_effects != null)
+            {
+                _effects.Particles.Configure(EffectType.None, _settings.EffectIntensity);   // hạt đang rơi rơi nốt rồi tự ẩn
+            }
+        }
+
+        private bool EnsureEffectsWindow()
+        {
+            if (_effects != null && _effects.IsAlive) return true;
+            CloseEffectsWindow(restoreWallpaper: false);
+            try
+            {
+                var window = new EffectsWindow();
+                window.SetBackground(_currentWallpaperFile ?? WallpaperSetter.GetCurrent());
+                if (!window.AttachToDesktop())
+                {
+                    window.Close();
+                    Log.Warn("Không tìm thấy lớp desktop để hiện hiệu ứng");
+                    if (!_effectsFailedNotified)
+                    {
+                        _effectsFailedNotified = true;
+                        _tray?.Notify("Không bật được hiệu ứng", "Windows chưa cho gắn lớp hiệu ứng vào desktop. Thử khởi động lại máy rồi bật lại.", warning: true);
+                    }
+                    return false;
+                }
+                window.Particles.Idle += () => _dispatcher.InvokeAsync(() =>
+                {
+                    if (_settings.Effect == EffectType.None || EffectsPausedForBattery) CloseEffectsWindow(restoreWallpaper: true);
+                });
+                _effects = window;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Lỗi tạo lớp hiệu ứng", ex);
+                return false;
+            }
+        }
+
+        private void CloseEffectsWindow(bool restoreWallpaper)
+        {
+            if (_effects == null) return;
+            try
+            {
+                _effects.Particles.Stop();
+                _effects.Close();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Đóng lớp hiệu ứng lỗi: {ex.Message}");
+            }
+            _effects = null;
+            // Đặt lại hình nền để Windows vẽ lại vùng desktop vừa được giải phóng.
+            if (restoreWallpaper && _currentWallpaperFile != null && File.Exists(_currentWallpaperFile))
+            {
+                try { WallpaperSetter.Set(_currentWallpaperFile); } catch { }
+            }
+        }
+
         public bool SetStartup(bool enabled)
         {
             var ok = StartupRegistration.Set(enabled);
@@ -940,6 +1053,11 @@ namespace WallpaperQuote
 
         private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
         {
+            if (e.Mode == PowerModes.StatusChange)
+            {
+                _dispatcher.InvokeAsync(ApplyEffects);
+                return;
+            }
             if (e.Mode != PowerModes.Resume) return;
             _dispatcher.InvokeAsync(async () =>
             {
@@ -962,6 +1080,7 @@ namespace WallpaperQuote
             {
                 await Task.Delay(2000);
                 await ChangeAsync(Change.Rerender, auto: true);
+                _effects?.Reposition();
             });
         }
 
@@ -988,6 +1107,7 @@ namespace WallpaperQuote
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             foreach (var w in _watchers) w.Dispose();
             _watchers.Clear();
+            CloseEffectsWindow(restoreWallpaper: true);
             _tray?.Dispose();
             _tray = null;
             Log.Info("Thoát app");

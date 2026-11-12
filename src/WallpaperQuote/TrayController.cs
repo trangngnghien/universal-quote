@@ -19,6 +19,8 @@ namespace WallpaperQuote
         private readonly Forms.ContextMenuStrip _menu;
         private readonly Forms.ToolStripMenuItem _status;
         private readonly Forms.ToolStripMenuItem _pause;
+        private readonly Forms.ToolStripMenuItem _effects;
+        private readonly (string Type, Forms.ToolStripMenuItem Item)[] _fxItems;
         private Drawing.Icon? _runningIcon;
         private Drawing.Icon? _pausedIcon;
 
@@ -44,6 +46,18 @@ namespace WallpaperQuote
             _menu.Items.Add(_pause);
             _menu.Items.Add(Item("Thông tin ảnh hiện tại", ShowCurrentInfo));
             _menu.Items.Add(Item("Chỉnh vị trí quote…", () => _ = _host.EditQuotePositionAsync()));
+            _effects = new Forms.ToolStripMenuItem("Hiệu ứng");
+            _effects.DropDownItems.Add(Item("Thả một đợt ngay (10 giây)", () => _host.BurstEffect()));
+            _effects.DropDownItems.Add(new Forms.ToolStripSeparator());
+            _fxItems = new[]
+            {
+                (EffectType.None, Item("Tắt hiệu ứng liên tục", () => _host.SetEffect(EffectType.None))),
+                (EffectType.Snow, Item("Tuyết rơi", () => _host.SetEffect(EffectType.Snow))),
+                (EffectType.Rain, Item("Mưa rơi", () => _host.SetEffect(EffectType.Rain))),
+                (EffectType.Petals, Item("Hoa rơi", () => _host.SetEffect(EffectType.Petals)))
+            };
+            foreach (var (_, item) in _fxItems) _effects.DropDownItems.Add(item);
+            _menu.Items.Add(_effects);
             _menu.Items.Add(Item("Cài đặt…", () => _host.OpenSettings()));
             _menu.Items.Add(new Forms.ToolStripSeparator());
             _menu.Items.Add(Item("Thoát", () => _host.Exit()));
@@ -89,6 +103,7 @@ namespace WallpaperQuote
             var tooltip = paused ? $"{AppTitle} · Tạm dừng" : $"{AppTitle} · Nháy đúp để làm mới";
             _icon.Text = tooltip.Length > 120 ? tooltip.Substring(0, 120) : tooltip;
             _icon.Icon = paused ? _pausedIcon : _runningIcon;
+            foreach (var (type, item) in _fxItems) item.Checked = _host.Settings.Effect == type;
         }
 
         private void ShowCurrentInfo()

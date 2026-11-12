@@ -39,7 +39,6 @@ namespace WallpaperQuote.UI
         private readonly StackPanel _linkList = new StackPanel();
         private readonly CheckBox _nasa = new CheckBox { VerticalAlignment = VerticalAlignment.Center };
         private readonly CheckBox _wiki = new CheckBox { VerticalAlignment = VerticalAlignment.Center };
-        private readonly TextBox _nasaKey = new TextBox { Width = 280, Padding = new Thickness(4), VerticalAlignment = VerticalAlignment.Center };
         private readonly TextBlock _syncMessage = Ui.Text("", 12, color: Ui.Muted);
 
         // Tab Quote
@@ -71,6 +70,17 @@ namespace WallpaperQuote.UI
         private readonly TextBlock _cacheText = Ui.Text("", 12, color: Ui.Muted);
         private readonly TextBlock _positionText = Ui.Text("", 12, color: Ui.Muted);
 
+        // Tab Hiệu ứng
+        private readonly RadioButton _fxNone = new RadioButton { Content = "Tắt", GroupName = "fx", Margin = new Thickness(0, 0, 24, 0) };
+        private readonly RadioButton _fxSnow = new RadioButton { Content = "Tuyết rơi", GroupName = "fx", Margin = new Thickness(0, 0, 24, 0) };
+        private readonly RadioButton _fxRain = new RadioButton { Content = "Mưa rơi", GroupName = "fx", Margin = new Thickness(0, 0, 24, 0) };
+        private readonly RadioButton _fxPetals = new RadioButton { Content = "Hoa rơi", GroupName = "fx" };
+        private readonly RadioButton _fxLight = new RadioButton { Content = "Nhẹ", GroupName = "fxi", Margin = new Thickness(0, 0, 24, 0) };
+        private readonly RadioButton _fxMedium = new RadioButton { Content = "Vừa", GroupName = "fxi", Margin = new Thickness(0, 0, 24, 0) };
+        private readonly RadioButton _fxHeavy = new RadioButton { Content = "Dày", GroupName = "fxi" };
+        private readonly CheckBox _fxBattery = new CheckBox { Content = "Tạm dừng hiệu ứng khi máy chạy bằng pin" };
+        private readonly TextBlock _fxStatus = Ui.Text("", 12, color: Ui.Muted);
+
         private readonly TextBlock _footer = Ui.Text("", 13, color: Ui.Muted, wrap: false);
 
         public SettingsWindow(AppHost host)
@@ -92,6 +102,7 @@ namespace WallpaperQuote.UI
             tabs.Items.Add(Tab("Ảnh", BuildImagesTab()));
             tabs.Items.Add(Tab("Quote", BuildQuotesTab()));
             tabs.Items.Add(Tab("Lịch xoay", BuildScheduleTab()));
+            tabs.Items.Add(Tab("Hiệu ứng", BuildEffectsTab()));
             tabs.Items.Add(Tab("Chung", BuildGeneralTab()));
 
             var footer = new Border
@@ -135,7 +146,6 @@ namespace WallpaperQuote.UI
 
         private UIElement BuildImagesTab()
         {
-            var keyLink = Ui.Btn("Lấy key miễn phí", () => Shell.OpenUrl("https://api.nasa.gov/"), link: true);
 
             return Ui.Stack(
                 Header("Nguồn ảnh", "Ảnh từ mọi nguồn đang bật được xáo trộn chung."),
@@ -158,8 +168,6 @@ namespace WallpaperQuote.UI
                     Ui.Spacer(6),
                     _wiki,
                     Ui.Divider(),
-                    Ui.Row(Ui.Text("NASA API key (để trống = DEMO_KEY, giới hạn 50 lần/ngày)", 12, color: Ui.Muted), _nasaKey,
-                        Ui.Btn("Lưu key", () => _host.SetNasaApiKey(_nasaKey.Text)), keyLink),
                     Ui.Row(_syncMessage, Ui.Btn("Đồng bộ ngay", () => _ = _host.SyncOnlineAsync(force: true))))
             );
         }
@@ -385,6 +393,38 @@ namespace WallpaperQuote.UI
             );
         }
 
+        // ================================================================== Tab Hiệu ứng
+
+        private UIElement BuildEffectsTab()
+        {
+            return Ui.Stack(
+                Header("Hiệu ứng động", "Hạt rơi chuyển động trên hình nền, nằm phía sau các biểu tượng desktop."),
+                Ui.Card(
+                    Ui.Title("Hiệu ứng rơi liên tục"),
+                    Ui.Spacer(8),
+                    Ui.Horizontal(_fxNone, _fxSnow, _fxRain, _fxPetals),
+                    Ui.Divider(),
+                    Ui.Text("Mật độ", 13, bold: true),
+                    Ui.Spacer(4),
+                    Ui.Horizontal(_fxLight, _fxMedium, _fxHeavy),
+                    Ui.Spacer(10),
+                    _fxBattery,
+                    Ui.Spacer(6),
+                    _fxStatus),
+                Ui.Card(
+                    Ui.Title("Thả một đợt ngay"),
+                    Ui.Text("Hạt rơi dày trong 10 giây rồi tự dừng, dùng được cả khi hiệu ứng liên tục đang tắt. Cũng bấm được từ icon dưới khay → Hiệu ứng.", 12, color: Ui.Muted),
+                    Ui.Spacer(8),
+                    Ui.Horizontal(
+                        Ui.Btn("Thả tuyết", () => BurstWith(EffectType.Snow)),
+                        Ui.Btn("Thả mưa", () => BurstWith(EffectType.Rain)),
+                        Ui.Btn("Thả hoa", () => BurstWith(EffectType.Petals)))),
+                Ui.Text("Hiệu ứng dùng khoảng 1–3% CPU. Nếu thấy máy chậm, chọn mật độ Nhẹ hoặc tắt hiệu ứng.", 12, color: Ui.Muted)
+            );
+        }
+
+        private void BurstWith(string type) => _host.BurstEffect(type);
+
         // ================================================================== Tab Chung
 
         private UIElement BuildGeneralTab()
@@ -478,6 +518,14 @@ namespace WallpaperQuote.UI
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                 RefreshAll();
             };
+            _fxNone.Checked += (_, __) => { if (!_updating) _host.SetEffect(EffectType.None); };
+            _fxSnow.Checked += (_, __) => { if (!_updating) _host.SetEffect(EffectType.Snow); };
+            _fxRain.Checked += (_, __) => { if (!_updating) _host.SetEffect(EffectType.Rain); };
+            _fxPetals.Checked += (_, __) => { if (!_updating) _host.SetEffect(EffectType.Petals); };
+            _fxLight.Checked += (_, __) => { if (!_updating) _host.SetEffectIntensity(EffectIntensity.Light); };
+            _fxMedium.Checked += (_, __) => { if (!_updating) _host.SetEffectIntensity(EffectIntensity.Medium); };
+            _fxHeavy.Checked += (_, __) => { if (!_updating) _host.SetEffectIntensity(EffectIntensity.Heavy); };
+            _fxBattery.Click += (_, __) => { if (!_updating) _host.SetEffectPauseOnBattery(_fxBattery.IsChecked == true); };
             _fitFill.Checked += (_, __) => { if (!_updating) _ = _host.SetFitModeAsync(FitMode.Fill); };
             _fitFit.Checked += (_, __) => { if (!_updating) _ = _host.SetFitModeAsync(FitMode.Fit); };
             _fitStretch.Checked += (_, __) => { if (!_updating) _ = _host.SetFitModeAsync(FitMode.Stretch); };
@@ -497,11 +545,10 @@ namespace WallpaperQuote.UI
                 _subfolders.IsChecked = s.ScanSubfolders;
                 RebuildFolders();
                 RebuildLinks();
-                _nasa.Content = $"NASA – Ảnh thiên văn trong ngày  ·  {_host.OnlineImages.Count(OnlineSource.Nasa)} ảnh đã tải";
+                _nasa.Content = $"NASA – Thư viện ảnh (thiên hà, tinh vân, Trái Đất…)  ·  {_host.OnlineImages.Count(OnlineSource.Nasa)} ảnh đã tải";
                 _wiki.Content = $"Wikimedia Commons – Ảnh trong ngày  ·  {_host.OnlineImages.Count(OnlineSource.Wikimedia)} ảnh đã tải";
                 _nasa.IsChecked = s.NasaEnabled;
                 _wiki.IsChecked = s.WikimediaEnabled;
-                if (!_nasaKey.IsKeyboardFocusWithin) _nasaKey.Text = s.NasaApiKey == "DEMO_KEY" ? "" : s.NasaApiKey;
                 _syncMessage.Text = _host.IsSyncing ? "Đang đồng bộ…" : (s.LastOnlineSyncMessage ?? "Chưa đồng bộ lần nào.");
 
                 // Quote
@@ -527,6 +574,19 @@ namespace WallpaperQuote.UI
                 _stateText.Text = _host.IsPaused ? "Trạng thái: Tạm dừng" : "Trạng thái: Đang chạy";
                 _stateText.Foreground = _host.IsPaused ? Ui.Wait : Ui.Ok;
                 _pauseButton.Content = _host.IsPaused ? "Tiếp tục" : "Tạm dừng";
+
+                // Hiệu ứng
+                _fxNone.IsChecked = s.Effect == EffectType.None;
+                _fxSnow.IsChecked = s.Effect == EffectType.Snow;
+                _fxRain.IsChecked = s.Effect == EffectType.Rain;
+                _fxPetals.IsChecked = s.Effect == EffectType.Petals;
+                _fxLight.IsChecked = s.EffectIntensity == EffectIntensity.Light;
+                _fxMedium.IsChecked = s.EffectIntensity == EffectIntensity.Medium;
+                _fxHeavy.IsChecked = s.EffectIntensity == EffectIntensity.Heavy;
+                _fxBattery.IsChecked = s.EffectPauseOnBattery;
+                _fxStatus.Text = s.Effect == EffectType.None ? "Hiệu ứng liên tục đang tắt."
+                    : _host.EffectsPausedForBattery ? "Đang tạm dừng vì máy chạy bằng pin. Cắm sạc để hiệu ứng chạy lại."
+                    : "Đang chạy.";
 
                 // Chung
                 _startup.IsChecked = StartupRegistration.IsEnabled();
