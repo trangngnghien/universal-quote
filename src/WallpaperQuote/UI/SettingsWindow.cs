@@ -23,6 +23,9 @@ namespace WallpaperQuote.UI
         private bool _updating;
 
         // Tab Ảnh
+        private readonly RadioButton _modeRotate = new RadioButton { Content = "Đổi cả ảnh và quote (dùng các nguồn ảnh bên dưới)", GroupName = "imgmode", Margin = new Thickness(0, 0, 0, 6) };
+        private readonly RadioButton _modeQuoteOnly = new RadioButton { Content = "Giữ hình nền của tôi, chỉ đổi quote", GroupName = "imgmode" };
+        private readonly TextBlock _myWallpaperText = Ui.Text("", 12, color: Ui.Muted);
         private readonly CheckBox _subfolders = new CheckBox { Content = "Quét cả thư mục con", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
         private readonly StackPanel _folderList = new StackPanel();
         private readonly TextBlock _skipNote = Ui.Text("", 12, color: Ui.Muted);
@@ -158,6 +161,14 @@ namespace WallpaperQuote.UI
             return Ui.Stack(
                 Header("Nguồn ảnh", "Ảnh từ mọi nguồn đang bật được xáo trộn chung."),
                 Ui.Card(
+                    Ui.Title("Chế độ hình nền"),
+                    Ui.Spacer(8),
+                    _modeRotate,
+                    _modeQuoteOnly,
+                    Ui.Spacer(4),
+                    Ui.Row(_myWallpaperText, Ui.Btn("Chọn ảnh nền của tôi…", PickMyWallpaper)),
+                    Ui.Text("Ở chế độ này, cứ đổi hình nền như bình thường trong Windows (chuột phải desktop → Personalize → Background). App tự lấy ảnh mới và ghi quote lên đó.", 12, color: Ui.Muted)),
+                Ui.Card(
                     Ui.Row(Ui.Title("Thư mục trên máy"), _subfolders, Ui.Btn("+ Thêm thư mục", PickFolder)),
                     _folderList,
                     _skipNote,
@@ -179,6 +190,17 @@ namespace WallpaperQuote.UI
                     Ui.Divider(),
                     Ui.Row(_syncMessage, Ui.Btn("Đồng bộ ngay", () => _ = _host.SyncOnlineAsync(force: true))))
             );
+        }
+
+        private void PickMyWallpaper()
+        {
+            using var dialog = new Forms.OpenFileDialog
+            {
+                Title = "Chọn ảnh làm hình nền của tôi",
+                Filter = "Ảnh|*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.jfif;*.gif;*.tif;*.tiff|Tất cả file|*.*"
+            };
+            if (dialog.ShowDialog() == Forms.DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.FileName))
+                _ = _host.SetMyWallpaperAsync(dialog.FileName);
         }
 
         private void PickFolder()
@@ -499,6 +521,8 @@ namespace WallpaperQuote.UI
 
         private void WireEvents()
         {
+            _modeRotate.Checked += (_, __) => { if (!_updating) _ = _host.SetQuoteOnlyAsync(false); };
+            _modeQuoteOnly.Checked += (_, __) => { if (!_updating) _ = _host.SetQuoteOnlyAsync(true); };
             _allowSmall.Click += (_, __) => { if (!_updating) _ = _host.SetAllowSmallImagesAsync(_allowSmall.IsChecked == true); };
             _subfolders.Click += (_, __) => { if (!_updating) _ = _host.SetScanSubfoldersAsync(_subfolders.IsChecked == true); };
             _nasa.Click += (_, __) => { if (!_updating) _host.SetNasaEnabled(_nasa.IsChecked == true); };
@@ -562,6 +586,11 @@ namespace WallpaperQuote.UI
                 // Ảnh
                 _subfolders.IsChecked = s.ScanSubfolders;
                 _allowSmall.IsChecked = s.MinImageWidth < 800;
+                _modeRotate.IsChecked = !s.QuoteOnlyMode;
+                _modeQuoteOnly.IsChecked = s.QuoteOnlyMode;
+                _myWallpaperText.Text = s.MyWallpaper != null && System.IO.File.Exists(s.MyWallpaper)
+                    ? "Hình nền của tôi: " + (s.MyWallpaperSource ?? s.MyWallpaper)
+                    : "Chưa có hình nền của tôi – app sẽ lấy hình nền Windows hiện tại khi bật chế độ này.";
                 RebuildFolders();
                 RebuildLinks();
                 _nasa.Content = $"NASA – Thư viện ảnh (thiên hà, tinh vân, Trái Đất…)  ·  {_host.OnlineImages.Count(OnlineSource.Nasa)} ảnh đã tải";

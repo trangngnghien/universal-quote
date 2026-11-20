@@ -131,6 +131,12 @@ namespace WallpaperQuote.Core
         // Ảnh
         public List<string> Folders { get; set; } = new List<string>();
         public bool ScanSubfolders { get; set; } = true;
+        /// <summary>Chế độ "Chỉ đổi quote": giữ hình nền của người dùng, chỉ ghép quote ngẫu nhiên lên đó (W1.4).</summary>
+        public bool QuoteOnlyMode { get; set; }
+        /// <summary>Bản sao hình nền của người dùng (trong thư mục app) dùng cho chế độ Chỉ đổi quote.</summary>
+        public string? MyWallpaper { get; set; }
+        /// <summary>Đường dẫn gốc của hình nền người dùng (để hiển thị).</summary>
+        public string? MyWallpaperSource { get; set; }
         public List<ImageLink> Links { get; set; } = new List<ImageLink>();
         public bool NasaEnabled { get; set; } = true;
         public string NasaApiKey { get; set; } = "DEMO_KEY";

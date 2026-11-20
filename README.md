@@ -9,6 +9,13 @@ App Windows tự đổi hình nền máy tính kèm một câu quote ngẫu nhi�
 3. Cửa sổ **Cài đặt** tự mở; app tạo lối tắt **"Hình nền & Quote"** ngoài desktop để mở lại Cài đặt bất cứ lúc nào.
 4. Icon xanh dưới khay hệ thống: nháy đúp = làm mới; chuột phải = menu.
 
+## Bản 0.5: Giữ hình nền của tôi, chỉ đổi quote
+
+- Chuột phải icon xanh dưới khay → tick **Chỉ đổi quote (giữ hình nền của tôi)**. Hoặc: Cài đặt → tab **Ảnh** → *Chế độ hình nền* → **Giữ hình nền của tôi, chỉ đổi quote**.
+- App lấy hình nền Windows bạn đang dùng (hoặc bấm *Chọn ảnh nền của tôi…*) và chỉ đổi câu quote trên đó theo lịch.
+- Đổi hình nền như bình thường trong Windows (chuột phải desktop → Personalize → Background): app tự nhận ảnh mới và ghi quote lên.
+- Lưu ý: chế độ Slideshow / Windows Spotlight sẽ bị thay bằng 1 ảnh cố định có quote.
+
 ## Bản 0.4.2: click lên desktop để thả hiệu ứng
 
 1. Chuột phải icon xanh dưới khay → **Hiệu ứng** → chọn **Tuyết rơi** (hoặc Mưa / Hoa).

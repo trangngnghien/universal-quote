@@ -29,7 +29,7 @@ namespace WallpaperQuote
     /// </summary>
     public sealed class AppHost : IDisposable
     {
-        public const string Version = "0.4.2";
+        public const string Version = "0.5.0";
 
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
@@ -63,6 +63,7 @@ namespace WallpaperQuote
         private bool _editingPosition;
         private EffectsWindow? _effects;
         private DesktopClickHook? _clickHook;
+        private readonly DispatcherTimer _wallpaperDebounce = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         private bool _effectsFailedNotified;
         private string? _currentWallpaperFile;
 
@@ -111,6 +112,13 @@ namespace WallpaperQuote
 
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            _wallpaperDebounce.Tick += async (_, __) =>
+            {
+                _wallpaperDebounce.Stop();
+                if (_settings.QuoteOnlyMode && WindowsWallpaperChangedByUser())
+                    await ChangeAsync(Change.Image, auto: false);
+            };
 
             _tray = new TrayController(this);
             _tray.Show();
@@ -227,7 +235,23 @@ namespace WallpaperQuote
             var changeImage = change.HasFlag(Change.Image) || image == null || !File.Exists(image);
             var changeQuote = change.HasFlag(Change.Quote) || quote == null;
 
-            if (changeImage) image = PickImage();
+            if (_settings.QuoteOnlyMode)
+            {
+                // Giữ hình nền của người dùng; nếu họ vừa tự đổi hình nền trong Windows thì lấy ảnh mới đó.
+                AdoptWindowsWallpaperIfChanged();
+                image = MyWallpaperPath;
+                changeImage = false;
+                if (image == null && !_noImageNotified)
+                {
+                    _noImageNotified = true;
+                    _tray?.Notify("Chưa có hình nền của bạn",
+                        "Mở Cài đặt → tab Ảnh → bấm \"Chọn ảnh nền của tôi…\". Tạm thời quote hiện trên nền tối.", warning: true);
+                }
+            }
+            else if (changeImage)
+            {
+                image = PickImage();
+            }
             if (changeQuote) quote = _quoteBag.Next();
 
             var screen = (Forms.Screen.PrimaryScreen ?? Forms.Screen.AllScreens.First()).Bounds;
@@ -242,6 +266,11 @@ namespace WallpaperQuote
                     var request = new RenderRequest(image, quote, width, height, _settings.FitMode, _settings.QuotePosX, _settings.QuotePosY);
                     await Sta.Run(() => WallpaperRenderer.RenderToFile(request, output));
                     break;
+                }
+                catch (ImageDecodeException ex) when (_settings.QuoteOnlyMode && attempt < 1)
+                {
+                    Log.Warn($"Không đọc được hình nền của bạn: {ex.Message}");
+                    image = null;
                 }
                 catch (ImageDecodeException ex) when (attempt < 5)
                 {
@@ -304,6 +333,92 @@ namespace WallpaperQuote
             _folderImages.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
             if (_online.FindByFile(path) != null && !File.Exists(path)) _online.Remove(path);
             RebuildImageBag();
+        }
+
+        // ================================================================== Chế độ Chỉ đổi quote (W1.4)
+
+        public bool QuoteOnly => _settings.QuoteOnlyMode;
+
+        private string? MyWallpaperPath =>
+            _settings.MyWallpaper != null && File.Exists(_settings.MyWallpaper) ? _settings.MyWallpaper : null;
+
+        /// <summary>Bật/tắt chế độ giữ hình nền của người dùng, chỉ đổi quote.</summary>
+        public async Task SetQuoteOnlyAsync(bool on)
+        {
+            if (on && MyWallpaperPath == null)
+            {
+                var found = FindUserWallpaper();
+                if (found != null) AdoptWallpaper(found);
+            }
+            _settings.QuoteOnlyMode = on;
+            SettingsStore.Save(_settings);
+            _noImageNotified = false;
+            Log.Info(on ? $"Bật chế độ Chỉ đổi quote (hình nền: {_settings.MyWallpaperSource ?? "chưa có"})" : "Tắt chế độ Chỉ đổi quote");
+            await ChangeAsync(Change.Image, auto: false);
+            RestartTimers();
+        }
+
+        /// <summary>Người dùng tự chọn file ảnh làm hình nền của mình.</summary>
+        public async Task SetMyWallpaperAsync(string file)
+        {
+            if (!AdoptWallpaper(file))
+            {
+                _tray?.Notify("Không dùng được ảnh này", "Hãy chọn file ảnh jpg, png, bmp hoặc webp.", warning: true);
+                return;
+            }
+            if (_settings.QuoteOnlyMode) await ChangeAsync(Change.Image, auto: false);
+            else NotifyChanged();
+        }
+
+        private static bool IsAppFile(string path) =>
+            path.StartsWith(Paths.LocalDir, StringComparison.OrdinalIgnoreCase);
+
+        private bool WindowsWallpaperChangedByUser()
+        {
+            var current = WallpaperSetter.GetCurrent();
+            return current != null && !IsAppFile(current) && File.Exists(current);
+        }
+
+        private void AdoptWindowsWallpaperIfChanged()
+        {
+            if (!WindowsWallpaperChangedByUser()) return;
+            var current = WallpaperSetter.GetCurrent()!;
+            if (AdoptWallpaper(current)) Log.Info($"Người dùng đổi hình nền trong Windows → dùng ảnh mới cho quote: {current}");
+        }
+
+        /// <summary>Tìm hình nền "thật" của người dùng: hình nền Windows hiện tại (nếu không phải do app đặt), rồi tới hình nền lúc cài app.</summary>
+        private string? FindUserWallpaper()
+        {
+            var current = WallpaperSetter.GetCurrent();
+            if (current != null && !IsAppFile(current) && File.Exists(current)) return current;
+            var original = _settings.OriginalWallpaper;
+            if (original != null && !IsAppFile(original) && File.Exists(original)) return original;
+            // Không dùng TranscodedWallpaper của Windows: đó có thể là ảnh app đã ghép quote trước đó.
+            return null;
+        }
+
+        /// <summary>Chép ảnh vào thư mục app (ảnh gốc có thể bị Windows ghi đè hoặc xoá).</summary>
+        private bool AdoptWallpaper(string source)
+        {
+            try
+            {
+                var ext = Path.GetExtension(source).ToLowerInvariant();
+                if (string.IsNullOrEmpty(ext) || ext.Length > 6) ext = ".jpg";   // TranscodedWallpaper không có đuôi
+                var target = Paths.MyWallpaperFile(ext);
+                var old = _settings.MyWallpaper;
+                File.Copy(source, target, overwrite: true);
+                if (old != null && !string.Equals(old, target, StringComparison.OrdinalIgnoreCase) && IsAppFile(old) && File.Exists(old))
+                    File.Delete(old);
+                _settings.MyWallpaper = target;
+                _settings.MyWallpaperSource = source;
+                SettingsStore.Save(_settings);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Không chép được hình nền của bạn ({source}): {ex.Message}");
+                return false;
+            }
         }
 
         // ================================================================== Kho ảnh
@@ -1082,6 +1197,7 @@ namespace WallpaperQuote
         private void RestartTimers()
         {
             RestartTimer(_imageTimer, _settings.ImageIntervalMinutes);
+            if (_settings.QuoteOnlyMode) _imageTimer.Stop();
             RestartTimer(_quoteTimer, _settings.QuoteIntervalMinutes);
         }
 
@@ -1093,7 +1209,7 @@ namespace WallpaperQuote
         }
 
         public DateTime? NextImageChange =>
-            _settings.Paused || _lastImageChange == DateTime.MinValue ? (DateTime?)null : _lastImageChange.AddMinutes(_settings.ImageIntervalMinutes);
+            _settings.Paused || _settings.QuoteOnlyMode || _lastImageChange == DateTime.MinValue ? (DateTime?)null : _lastImageChange.AddMinutes(_settings.ImageIntervalMinutes);
 
         public DateTime? NextQuoteChange =>
             _settings.Paused || _lastQuoteChange == DateTime.MinValue ? (DateTime?)null : _lastQuoteChange.AddMinutes(_settings.QuoteIntervalMinutes);
@@ -1102,6 +1218,9 @@ namespace WallpaperQuote
         public string DescribeCurrentImage()
         {
             var image = _currentImage;
+            if (_settings.QuoteOnlyMode)
+                return image == null ? "Chế độ Chỉ đổi quote – chưa có hình nền của bạn (đang dùng nền tối)"
+                                     : $"Hình nền của bạn (chế độ Chỉ đổi quote)\n{_settings.MyWallpaperSource ?? image}";
             if (image == null) return "Chưa có ảnh (đang dùng nền tối)";
             var online = _online.FindByFile(image);
             if (online != null)
@@ -1140,6 +1259,18 @@ namespace WallpaperQuote
             });
         }
 
+        /// <summary>Người dùng đổi hình nền trong Windows (Cá nhân hoá) → ở chế độ Chỉ đổi quote, ghép quote lên ảnh mới.</summary>
+        private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+        {
+            if (e.Category != UserPreferenceCategory.Desktop) return;
+            _dispatcher.InvokeAsync(() =>
+            {
+                if (!_settings.QuoteOnlyMode || _disposed) return;
+                _wallpaperDebounce.Stop();
+                _wallpaperDebounce.Start();
+            });
+        }
+
         private void OnDisplaySettingsChanged(object? sender, EventArgs e)
         {
             _dispatcher.InvokeAsync(async () =>
@@ -1171,6 +1302,8 @@ namespace WallpaperQuote
             _rescanDebounce.Stop();
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            _wallpaperDebounce.Stop();
             foreach (var w in _watchers) w.Dispose();
             _watchers.Clear();
             _clickHook?.Dispose();

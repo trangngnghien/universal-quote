@@ -20,6 +20,7 @@ namespace WallpaperQuote
         private readonly Forms.ToolStripMenuItem _status;
         private readonly Forms.ToolStripMenuItem _pause;
         private readonly Forms.ToolStripMenuItem _effects;
+        private readonly Forms.ToolStripMenuItem _quoteOnly;
         private readonly (string Kind, Forms.ToolStripMenuItem Item)[] _kindItems;
         private readonly (string Mode, Forms.ToolStripMenuItem Item)[] _modeItems;
         private readonly (int Seconds, Forms.ToolStripMenuItem Item)[] _secondItems;
@@ -43,6 +44,9 @@ namespace WallpaperQuote
             refresh.DropDownItems.Add(Item("Chỉ đổi ảnh", () => _ = _host.ChangeAsync(Change.Image, auto: false)));
             refresh.DropDownItems.Add(Item("Chỉ đổi quote", () => _ = _host.ChangeAsync(Change.Quote, auto: false)));
             _menu.Items.Add(refresh);
+
+            _quoteOnly = Item("Chỉ đổi quote (giữ hình nền của tôi)", () => _ = _host.SetQuoteOnlyAsync(!_host.QuoteOnly));
+            _menu.Items.Add(_quoteOnly);
 
             _pause = Item("Tạm dừng", () => _host.SetPaused(!_host.IsPaused));
             _menu.Items.Add(_pause);
@@ -122,6 +126,7 @@ namespace WallpaperQuote
             _icon.Text = tooltip.Length > 120 ? tooltip.Substring(0, 120) : tooltip;
             _icon.Icon = paused ? _pausedIcon : _runningIcon;
             var st = _host.Settings;
+            _quoteOnly.Checked = st.QuoteOnlyMode;
             foreach (var (kind, item) in _kindItems) item.Checked = st.EffectKind == kind;
             foreach (var (mode, item) in _modeItems) item.Checked = st.EffectMode == mode;
             foreach (var (sec, item) in _secondItems) item.Checked = st.EffectBurstSeconds == sec;

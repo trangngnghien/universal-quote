@@ -31,6 +31,9 @@ namespace WallpaperQuote.Core
         /// <summary>Luân phiên 2 file để Windows không dùng lại ảnh cũ trong bộ nhớ đệm.</summary>
         public static string WallpaperFile(int slot) => Path.Combine(LocalDir, $"wallpaper_{slot}.jpg");
 
+        /// <summary>Bản sao hình nền riêng của người dùng (chế độ Chỉ đổi quote).</summary>
+        public static string MyWallpaperFile(string extension) => Path.Combine(LocalDir, "my-wallpaper" + extension);
+
         private static string Ensure(string dir)
         {
             Directory.CreateDirectory(dir);
