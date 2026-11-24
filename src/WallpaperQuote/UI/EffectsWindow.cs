@@ -60,8 +60,8 @@ namespace WallpaperQuote.UI
         /// <summary>Gắn cửa sổ vào lớp desktop phía sau icon. Trả false nếu không tìm thấy lớp đó.</summary>
         public bool AttachToDesktop()
         {
-            var workerW = DesktopLayer.FindWorkerW();
-            if (workerW == IntPtr.Zero) return false;
+            var layer = DesktopLayer.Find();
+            if (layer.Parent == IntPtr.Zero) return false;
 
             var helper = new WindowInteropHelper(this);
             var hwnd = helper.EnsureHandle();
@@ -70,8 +70,17 @@ namespace WallpaperQuote.UI
             DesktopLayer.SetWindowLongPtr(hwnd, DesktopLayer.GWL_STYLE, new IntPtr(style));
             var exStyle = DesktopLayer.GetWindowLongPtr(hwnd, DesktopLayer.GWL_EXSTYLE).ToInt64();
             exStyle |= DesktopLayer.WS_EX_NOACTIVATE | DesktopLayer.WS_EX_TRANSPARENT | DesktopLayer.WS_EX_TOOLWINDOW;
+            if (layer.Raised) exStyle |= DesktopLayer.WS_EX_LAYERED;
             DesktopLayer.SetWindowLongPtr(hwnd, DesktopLayer.GWL_EXSTYLE, new IntPtr(exStyle));
-            if (DesktopLayer.SetParent(hwnd, workerW) == IntPtr.Zero)
+            if (layer.Raised)
+            {
+                // Windows 11 24H2+: Progman là cửa sổ "layered"; cửa sổ con cũng phải layered mới hiện được.
+                DesktopLayer.SetLayeredWindowAttributes(hwnd, 0, 255, DesktopLayer.LWA_ALPHA);
+                var source = HwndSource.FromHwnd(hwnd);
+                if (source?.CompositionTarget != null) source.CompositionTarget.RenderMode = RenderMode.SoftwareOnly;
+            }
+
+            if (DesktopLayer.SetParent(hwnd, layer.Parent) == IntPtr.Zero)
             {
                 Log.Warn("Không gắn được lớp hiệu ứng vào desktop (SetParent)");
                 return false;
@@ -79,6 +88,16 @@ namespace WallpaperQuote.UI
 
             Show();
             Reposition();
+            if (layer.Raised)
+            {
+                // Đặt ngay dưới lớp icon (SHELLDLL_DefView) và trên lớp vẽ hình nền (WorkerW).
+                DesktopLayer.SetWindowPos(hwnd, layer.Icons, 0, 0, 0, 0,
+                    DesktopLayer.SWP_NOMOVE | DesktopLayer.SWP_NOSIZE | DesktopLayer.SWP_NOACTIVATE);
+                if (layer.Wallpaper != IntPtr.Zero)
+                    DesktopLayer.SetWindowPos(layer.Wallpaper, DesktopLayer.HWND_BOTTOM, 0, 0, 0, 0,
+                        DesktopLayer.SWP_NOMOVE | DesktopLayer.SWP_NOSIZE | DesktopLayer.SWP_NOACTIVATE);
+            }
+            Log.Info(layer.Raised ? "Lớp hiệu ứng: kiểu Windows 11 24H2+ (con của Progman, dưới icon)" : "Lớp hiệu ứng: kiểu cũ (con của WorkerW)");
             return true;
         }
 
@@ -113,6 +132,43 @@ namespace WallpaperQuote.UI
         public const long WS_EX_NOACTIVATE = 0x08000000L;
         public const long WS_EX_TRANSPARENT = 0x00000020L;
         public const long WS_EX_TOOLWINDOW = 0x00000080L;
+        public const long WS_EX_LAYERED = 0x00080000L;
+        public const uint LWA_ALPHA = 0x2;
+        public const uint SWP_NOSIZE = 0x0001;
+        public const uint SWP_NOMOVE = 0x0002;
+        public static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint key, byte alpha, uint flags);
+
+        public struct Layer
+        {
+            public IntPtr Parent;     // cửa sổ cha để gắn lớp hiệu ứng
+            public IntPtr Icons;      // SHELLDLL_DefView
+            public IntPtr Wallpaper;  // WorkerW vẽ hình nền
+            public bool Raised;       // Windows 11 24H2+: icon nằm trực tiếp trong Progman
+        }
+
+        public static Layer Find()
+        {
+            var progman = FindWindow("Progman", null);
+            if (progman == IntPtr.Zero) return default;
+            SendMessageTimeout(progman, 0x052C, new IntPtr(0xD), new IntPtr(0x1), 0, 1000, out _);
+            SendMessageTimeout(progman, 0x052C, IntPtr.Zero, IntPtr.Zero, 0, 1000, out _);
+
+            var icons = FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
+            if (icons != IntPtr.Zero)
+            {
+                return new Layer
+                {
+                    Parent = progman,
+                    Icons = icons,
+                    Wallpaper = FindWindowEx(progman, IntPtr.Zero, "WorkerW", null),
+                    Raised = true
+                };
+            }
+            return new Layer { Parent = FindWorkerW() };
+        }
         public const uint SWP_NOZORDER = 0x0004;
         public const uint SWP_NOACTIVATE = 0x0010;
         public const uint SWP_SHOWWINDOW = 0x0040;

@@ -29,7 +29,7 @@ namespace WallpaperQuote
     /// </summary>
     public sealed class AppHost : IDisposable
     {
-        public const string Version = "0.5.0";
+        public const string Version = "0.5.1";
 
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
         private readonly ShuffleBag<string> _imageBag = new ShuffleBag<string>(StringComparer.OrdinalIgnoreCase);
